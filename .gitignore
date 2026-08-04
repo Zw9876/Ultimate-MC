@@ -1,0 +1,28 @@
+# ── C# build output ──
+bin/
+obj/
+
+# ── Claude Code / IDE ──
+.claude/
+.vs/
+
+# ── Launcher runtime & game files (large / not distributable) ──
+runtime/
+versions/
+servers/
+skins/
+
+# ── User state (regenerated) ──
+config.txt
+computer_uuid.dat
+version_manifest_v2.json
+*.exe
+*.exe.WebView2/
+.mixin.out/
+
+# ── Logs / temp ──
+**/logs/
+**/crash-reports/
+*.log
+*.tmp
+Thumbs.db

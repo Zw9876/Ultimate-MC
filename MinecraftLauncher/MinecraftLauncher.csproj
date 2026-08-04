@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>MinecraftLauncher</AssemblyName>
+    <RootNamespace>MinecraftLauncher</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Disable auto-detection so we can point at App.xaml in the UI folder -->
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+  </PropertyGroup>
+
+  <!--
+    To produce a single distributable exe, publish with the win-x64 runtime and
+    the PublishSingleFile flag (see README). A normal build/run does not need
+    these, and keeping RuntimeIdentifier out of the csproj means a plain build
+    will not try to download platform-specific runtime packs.
+  -->
+
+  <ItemGroup>
+    <ApplicationDefinition Include="UI\App.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </ApplicationDefinition>
+  </ItemGroup>
+
+</Project>

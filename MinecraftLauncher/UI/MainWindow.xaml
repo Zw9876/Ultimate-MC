@@ -1,0 +1,123 @@
+<Window x:Class="MinecraftLauncher.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Minecraft Portable Launcher" Height="560" Width="820"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource BgBrush}">
+
+    <Grid Margin="0">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="170"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Sidebar -->
+        <StackPanel Grid.Column="0" Background="{StaticResource PanelBrush}">
+            <TextBlock Text="LAUNCHER" FontSize="16" FontWeight="Bold"
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="18,22,0,24"/>
+            <RadioButton x:Name="NavClient" Content="CLIENT" GroupName="nav"
+                         IsChecked="True" Checked="NavClient_Checked"
+                         Style="{StaticResource NavStyle}"/>
+            <RadioButton x:Name="NavServer" Content="SERVER" GroupName="nav"
+                         Checked="NavServer_Checked"
+                         Style="{StaticResource NavStyle}"/>
+        </StackPanel>
+
+        <!-- Content -->
+        <Grid Grid.Column="1" Margin="28,24,28,24">
+
+            <!-- ══ CLIENT TAB ══ -->
+            <StackPanel x:Name="ClientPanel" Visibility="Visible">
+                <TextBlock Text="Play" FontSize="22" FontWeight="Bold" Margin="0,0,0,18"/>
+
+                <TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                <ComboBox x:Name="VersionCombo" Height="30" Margin="0,0,0,14"
+                          SelectionChanged="VersionCombo_SelectionChanged"/>
+
+                <TextBlock Text="Loader" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                <ComboBox x:Name="LoaderCombo" Height="30" Margin="0,0,0,14"/>
+
+                <TextBlock Text="Username" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                <TextBox x:Name="UsernameBox" Height="30" Margin="0,0,0,14"
+                         Background="{StaticResource FieldBrush}" Foreground="{StaticResource TextBrush}"
+                         BorderThickness="0" Padding="8,4" VerticalContentAlignment="Center"/>
+
+                <TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4">
+                    <Run Text="Memory: "/>
+                    <Run x:Name="MemLabel" Text="2 GB"/>
+                </TextBlock>
+                <Slider x:Name="MemSlider" Minimum="1" Maximum="16" Value="2"
+                        TickFrequency="1" IsSnapToTickEnabled="True"
+                        SmallChange="1" LargeChange="2"
+                        ValueChanged="MemSlider_ValueChanged" Margin="0,0,0,22"/>
+
+                <Button x:Name="PlayButton" Content="PLAY" Height="42" Width="160"
+                        HorizontalAlignment="Left" Click="PlayButton_Click"
+                        Style="{StaticResource AccentButton}"/>
+
+                <TextBlock x:Name="ClientStatus" Foreground="{StaticResource MutedBrush}"
+                           Margin="0,16,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <!-- ══ SERVER TAB ══ -->
+            <StackPanel x:Name="ServerPanel" Visibility="Collapsed">
+                <TextBlock Text="Host Server" FontSize="22" FontWeight="Bold" Margin="0,0,0,18"/>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="SvVersionCombo" Height="30" Margin="0,0,0,14"
+                                  SelectionChanged="SvVersionCombo_SelectionChanged"/>
+
+                        <TextBlock Text="Server Type" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="SvTypeCombo" Height="30" Margin="0,0,0,14"/>
+
+                        <TextBlock Text="Port" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                        <TextBox x:Name="SvPortBox" Text="25565" Height="30" Margin="0,0,0,14"
+                                 Background="{StaticResource FieldBrush}" Foreground="{StaticResource TextBrush}"
+                                 BorderThickness="0" Padding="8,4" VerticalContentAlignment="Center"/>
+
+                        <TextBlock Text="Max Players" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                        <TextBox x:Name="SvMaxBox" Text="10" Height="30" Margin="0,0,0,4"
+                                 Background="{StaticResource FieldBrush}" Foreground="{StaticResource TextBrush}"
+                                 BorderThickness="0" Padding="8,4" VerticalContentAlignment="Center"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Gamemode" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="SvGamemodeCombo" Height="30" Margin="0,0,0,14"/>
+
+                        <TextBlock Text="Difficulty" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="SvDifficultyCombo" Height="30" Margin="0,0,0,14"/>
+
+                        <TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4">
+                            <Run Text="Memory: "/>
+                            <Run x:Name="SvMemLabel" Text="2 GB"/>
+                        </TextBlock>
+                        <Slider x:Name="SvMemSlider" Minimum="1" Maximum="16" Value="2"
+                                TickFrequency="1" IsSnapToTickEnabled="True"
+                                SmallChange="1" LargeChange="2"
+                                ValueChanged="SvMemSlider_ValueChanged" Margin="0,0,0,14"/>
+
+                        <CheckBox x:Name="SvPvpCheck" Content="Enable PVP" IsChecked="True"
+                                  Foreground="{StaticResource TextBrush}" Margin="0,6,0,0"/>
+                    </StackPanel>
+                </Grid>
+
+                <Button x:Name="StartServerButton" Content="START SERVER" Height="42" Width="200"
+                        HorizontalAlignment="Left" Margin="0,20,0,0"
+                        Click="StartServerButton_Click" Style="{StaticResource AccentButton}"/>
+
+                <TextBlock x:Name="ServerStatus" Foreground="{StaticResource MutedBrush}"
+                           Margin="0,16,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
