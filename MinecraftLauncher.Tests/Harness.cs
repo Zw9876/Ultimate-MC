@@ -110,7 +110,17 @@ namespace MinecraftLauncher.Tests
     /// </remarks>
     public static class LocalInstall
     {
-        public const string Root = @"C:\Users\Zach\Ultimate-MC";
+        /// <summary>
+        /// The launcher folder, found by walking up from the test binary until the
+        /// repository is recognised.
+        /// </summary>
+        /// <remarks>
+        /// Derived rather than hardcoded so the suites run wherever the repo is
+        /// checked out. When the game folders are absent — a fresh clone, since
+        /// <c>versions/</c> and <c>servers/</c> are gitignored — the suites that read
+        /// them skip instead of failing.
+        /// </remarks>
+        public static string Root { get; } = FindRepoRoot();
 
         /// <summary>True once the real installs are reachable through Paths.</summary>
         public static bool Available { get; private set; }
@@ -119,6 +129,22 @@ namespace MinecraftLauncher.Tests
         {
             Core.Paths.BaseDirOverride = Root;
             Available = Directory.Exists(Path.Combine(Root, "versions"));
+        }
+
+        private static string FindRepoRoot()
+        {
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+
+            while (dir is not null)
+            {
+                if (File.Exists(Path.Combine(dir.FullName, "MinecraftLauncher", "MinecraftLauncher.csproj")))
+                    return dir.FullName;
+
+                dir = dir.Parent;
+            }
+
+            // Nothing recognisable above us; the suites will report as unavailable.
+            return AppContext.BaseDirectory;
         }
 
         /// <summary>A path inside the real launcher folder.</summary>

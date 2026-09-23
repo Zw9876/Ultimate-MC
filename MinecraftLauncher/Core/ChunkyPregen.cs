@@ -11,12 +11,12 @@ namespace MinecraftLauncher.Core
     /// </summary>
     /// <remarks>
     /// Pre-generating is the single biggest thing left that decides how a session
-    /// feels: with twenty people spreading out, an ungenerated world makes the
-    /// server build terrain during ticks, which is the most expensive thing it does.
-    /// The commands were always available by hand — this exists because the host has
-    /// roughly ninety minutes and a queue of people waiting, and in that window
-    /// nobody is going to remember that radius is a half-width while
-    /// <c>worldborder set</c> takes a diameter.
+    /// feels: with a crowd spreading out, an ungenerated world makes the server
+    /// build terrain during ticks, which is the most expensive thing it does.
+    /// The commands were always available by hand — this exists because a host
+    /// setting up under time pressure, with people waiting, is not going to
+    /// remember that radius is a half-width while <c>worldborder set</c> takes a
+    /// diameter.
     ///
     /// Every command emitted here is one verified against a real server (see
     /// HANDOFF section 14). <c>chunky trim</c> is deliberately absent: it deletes
@@ -35,7 +35,7 @@ namespace MinecraftLauncher.Core
         /// <summary>
         /// Chunks per second to assume before a task has reported a real rate.
         /// Measured on the dev box (i7-7700): 1521 chunks in 49 s, so ~31. The hosts
-        /// are Xeon Gold 6244s and will beat this, which is the direction an estimate
+        /// are faster workstation parts and will beat this, which is the direction an estimate
         /// should err in.
         /// </summary>
         public const double AssumedRate = 31.0;

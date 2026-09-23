@@ -257,7 +257,7 @@ including where WebView2 is loaded from — depends on it.
   before committing, a live progress bar fed by Chunky's own reports, pause / resume /
   stop, and a button that sets the world border to match. `Core/ChunkyPregen.cs`.
   This is the operational fix for the crowd problem in section 14, turned into
-  something that can be done in a ninety-minute window without remembering that
+  something that can be done inside a short session without remembering that
   radius is a half-width while `worldborder set` takes a diameter.
   - Chunk counts are exact, not approximate: `(2 * ceil(radius/16) + 1)²`, which
     predicted 7,921 for radius 700 and got 7,921 from a real run.
@@ -539,11 +539,16 @@ DLLs where higher settings cost minutes and save little.
 
 ## 9. Git
 
-**This repo is a local backup, not a published project.** The remote
-(`https://github.com/Zw9876/Ultimate-MC.git`) exists but the user's instruction is
-that the work stays on their machine — **commit freely, do not push** unless they
-ask for that specifically.
+**The remote is public.** `origin` is a public GitHub repository, so anything
+committed here is world-readable the moment it is pushed.
 
+- **Keep this document technical.** It was originally a private working file and
+  accumulated details that do not belong in public: hardware inventories, how many
+  people play, when the machine is free, absolute paths under a home directory.
+  Those have been generalised. Write findings and reasoning, not who-does-what.
+- **No secrets belong in the repo at all.** The skin server's RSA key lives under
+  `skins/`, which is ignored; keep it that way. Nothing tracked should contain a
+  key, token or credential.
 - Everything lives on `main`; there is no branching workflow.
 - The `.gitignore` excludes `runtime/`, `versions/`, `servers/`, `skins/`, `cache/`,
   `config/`, all build output, and the published launcher at the repo root (the
@@ -565,7 +570,7 @@ ask for that specifically.
 The port is complete and shipping. Rollout is no longer a problem: the machines
 run 1.2.x, they detect updates over the LAN, and only the host needs a new build
 by hand. Current build at the repo root and in the rollout zip: **1.2.265.81**
-(`C:\Users\Zach\Minecraft-Launcher-Update.zip`).
+(the zip is kept outside the repo — see section 8).
 
 **Cleared 2026-09-22.** The user ran both on the real machines and reported them
 working as intended: **"shut down for everyone" reaches watchers on other
@@ -1074,7 +1079,7 @@ remain one-off runs.
 | Modrinth explorer view | the fields the cards show, read live: icon url, categories with loader names stripped, "updated N days ago", environment, follower count, accent colour. All five sort options accepted by the API, downloads genuinely descending, paging returning a **non-overlapping** second page, and `updated` ordering differing from `downloads`. Icons: a real fetch, a second fetch served from cache byte-identical, and null (not a crash) for a missing or broken url. Then **looked at**: screenshots of the card list and the details pane, which is how the two visual faults were found — icons not clipped to their rounded corners, and categories rendering as plain text instead of pills. Driven through the UI end to end: 24 cards drawn, sort and Show more present, details pane replacing the prompt on click, version picker naming the exact jar and size, decline leaving the folder untouched, then a real install and the folder restored afterwards |
 | Modrinth | against the **live API**: loader mapping, filtered search (Fabric/NeoForge, real and impossible game versions), version listing, best-version choice, and dependency resolution — `sodium-extra` correctly pulled in Fabric API and Sodium and left the optional ones out. A **real download**: size and SHA-1 both matching what Modrinth published, the jar then passing the loader check as Fabric and failing it for NeoForge, appearing in the mods list, a repeat download being a no-op, and a **turned-off** copy still counting as present. Path traversal in a file name is flattened. Then through the real UI: the browser opened filtered to the right folder/version/loader, searched, offered a confirmation, **declined with nothing downloaded**, then installed Ksyxis for real — Mods tab went 35 → 36 with no false loader warning, and the folder was restored to exactly 35 afterwards |
 | Mod loader detection | run against **every real mod folder on this machine** — 35 Fabric client jars, 28 Fabric server, 20 Forge client, 17 Forge server, 21 NeoForge — with **no false alarms** in any of them, including the multi-loader jars that a name-based check would have flagged. Junk survives (a non-zip `.jar`, a missing file, an empty path). The turn-off/turn-on round trip was proven on a **temp copy of real jars**, not on the live folders: wrong ones off, right ones back on, switched to the other loader and back, file count unchanged throughout. Then through the real UI: no warning on a correct folder, the warning and its wording on a mismatched one, the confirmation offered and **declined**, and all five real mod folders verified untouched afterwards |
-| Player list | parsed from **real archived server logs** (`servers/fabric-26.1.2/logs`) — actual join and leave lines from real sessions, the real `list` reply including its trailing space when nobody is on, and `lost connection` / `logged in with entity id` lines that must not move the roster. Chat is the trap and is covered: `<Zach> haha I joined the game` does not add a player. Roster behaviour over a session: duplicate joins ignored, unknown leaves ignored, a `list` reply correcting people who joined before the console opened, and playtimes surviving that correction. Then through the real UI against a real server: the panel, the roster syncing from the server's own reply, the header line, and `list` not echoing into the console |
+| Player list | parsed from **real archived server logs** (`servers/fabric-26.1.2/logs`) — actual join and leave lines from real sessions, the real `list` reply including its trailing space when nobody is on, and `lost connection` / `logged in with entity id` lines that must not move the roster. Chat is the trap and is covered: `<Steve> haha I joined the game` does not add a player. Roster behaviour over a session: duplicate joins ignored, unknown leaves ignored, a `list` reply correcting people who joined before the console opened, and playtimes surviving that correction. Then through the real UI against a real server: the panel, the roster syncing from the server's own reply, the header line, and `list` not echoing into the console |
 | Pre-generation | parser written against **captured Chunky 1.5.3 output**, not from memory: running/finished/started lines, "No tasks to…", and lines that must not be mistaken for progress ("Preparing spawn area: 100%", "Can't keep up!"). Chunk counts checked against a real run (radius 300 → 1521) and section 14's table. Then driven through **UI Automation on the real launcher against a real Fabric server**: panel hidden until asked for, estimate tracking radius/shape/Nether, controls locked while running, live progress and bar, correct finish, controls released, and the border confirmation declining cleanly without sending a `worldborder` command. Radius 700 predicted 7,921 chunks and generated exactly 7,921 |
 | **On the real machines** (2026-09-22, user-reported, not instrumented here) | "shut down for everyone" reached watchers on other computers and closed their games; self-update found the host over the LAN unaided, which is the UDP hop every bench test had to pin with `SKIN_SERVER=`. Remote-preferred discovery was *not* isolated in that session and is still open — see section 10 |
 
@@ -1088,19 +1093,24 @@ fails silently as "skins just don't show up".
 
 Context that is not in the code but decides how the thing actually performs.
 
-### The real setup
+### What this was tuned for
 
-| | |
-|---|---|
-| Machines | Dell Precision 7820 towers — servers *and* clients |
-| CPU | **Xeon Gold 6244** — 8 cores, ~3.6 GHz base / 4.4 turbo. A high-frequency part, which is the right shape for Minecraft: the tick loop is single-threaded, so clock beats core count. **The host is not underpowered.** |
-| GPU | NVIDIA T1000 — roughly GTX 1650 class. Fine for Minecraft; not a bottleneck. |
-| Storage | 2 × 2 TB mechanical per machine. Fast at throughput, but chunk saving is latency-bound (~8-12 ms seeks), which is why `sync-chunk-writes` is forced off. |
-| Players | 15-20 at once, occasionally more. `max-players` is 25. |
-| Also runs | AutoCAD, Autodesk, Adobe CC — these are work machines. |
+A LAN of workstation-class desktops acting as both servers and clients, with a
+couple of dozen players on one world at a time.
 
-Dev box for comparison (where all testing happens): i7-7700, 4 cores, 16 GB.
-Slower than the hosts, so measurements taken here are a pessimistic floor.
+- **CPU: high clock beats core count.** Minecraft's tick loop is single-threaded,
+  so an 8-core part at a high frequency outperforms a many-core one at a lower
+  clock. On this kind of hardware, a struggling server is almost never a hardware
+  problem — see below for what it usually is.
+- **Storage: mechanical disks are the one real constraint.** Throughput is fine;
+  chunk saving is latency-bound (~8-12 ms seeks), which is why
+  `sync-chunk-writes` is forced off.
+- **GPU barely matters.** An entry-level workstation card is not the bottleneck.
+- The machines are shared with other work, so the launcher never assumes the whole
+  machine is available — hence the memory advice on both tabs.
+
+Measurements below were taken on a **slower** 4-core development machine than the
+hosts, so treat every rate as a pessimistic floor.
 
 ### What the launcher already does
 
@@ -1111,15 +1121,15 @@ their next start. Nothing meaningful is left to tune in `server.properties`.
 
 ### The remaining cause: worlds are not pre-generated
 
-The worlds are tiny (the main one was 26 MB / 29 region files). With twenty people
-spreading out, the server generates terrain **during ticks**, which is the most
-expensive thing it does and exactly matches "struggles sometimes". No launcher
-setting fixes this. Chunky is installed on all three servers.
+A world that has barely been explored is tiny (a real one here: 26 MB, 29 region
+files). With a crowd spreading out, the server generates terrain **during ticks**,
+which is the most expensive thing it does and exactly matches "it struggles
+sometimes". No launcher setting fixes this. Chunky is installed on all the servers.
 
-**Measured on the dev box** (i7-7700, so the hosts will be faster):
+**Measured on the slower development machine**, so a capable host will beat these:
 
 - **37 chunks/sec**, **9 KB per chunk**.
-- radius 3000 → 141 k chunks, ~1.2 GB, ~1 h here (expect 40-55 min on a 6244)
+- radius 3000 → 141 k chunks, ~1.2 GB, ~1 h here (expect ~40-55 min on a fast host)
 - radius 5000 → 391 k chunks, ~3.4 GB
 - radius 10000 → 1.56 M chunks, ~13 GB, 6-12 h
 
@@ -1153,10 +1163,11 @@ border button does the radius-to-diameter conversion. The commands are still wor
 knowing — the command box is right there, and the panel follows a run started by
 hand — but nothing here has to be done from memory any more.
 
-### The agreed plan
+### The plan
 
-The constraint is time, not capability: the user gets **~90 minutes** with the
-machine at most, and people always want to play. So the two jobs are separated.
+The constraint is usually time rather than capability: a session is short, the
+machine is not always available, and people want to play rather than wait. So the
+two jobs are separated.
 
 1. **Border first**, sized to what is already generated — this is what protects a
    session, because nobody can reach ungenerated land:
@@ -1165,7 +1176,7 @@ machine at most, and people always want to play. So the two jobs are separated.
 2. **Pre-generate to match** in the window: `chunky worldborder`, `chunky start`
    (~40-55 min), then the Nether at `chunky radius 375` (~2 min).
 3. **Keep generating past the border afterwards, even while people play** — they
-   cannot reach it, and it is far cheaper than twenty people generating randomly.
+   cannot reach it, and it is far cheaper than a crowd generating terrain randomly.
    `chunky pause` if anyone complains.
 4. **Widen the border only into finished terrain**, checked with `chunky progress`.
    `worldborder add 4000 300` creeps it outward over 300 s rather than jumping.
@@ -1173,8 +1184,8 @@ machine at most, and people always want to play. So the two jobs are separated.
 Order is always **generate first, widen second**. A border that outruns the
 generated area puts you straight back to generating during play.
 
-Two cautions worth repeating to the user: `worldborder set` shrinks **instantly**,
-so anyone outside the new border is pushed in and takes damage — check where people
-have built first. And since they start fresh worlds fairly often, the cheapest habit
-is to pre-generate a new world while it is empty, rather than retrofitting one
-people already live in.
+Two cautions worth repeating: `worldborder set` shrinks **instantly**, so anyone
+outside the new border is pushed in and takes damage — check where people have built
+first. And if fresh worlds get started fairly often, the cheapest habit is to
+pre-generate a new one while it is still empty, rather than retrofitting one people
+already live in.

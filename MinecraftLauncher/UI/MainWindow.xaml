@@ -361,9 +361,9 @@
                 <!-- ══ PRE-GENERATION ══ -->
                 <!-- The worlds not being pre-generated is the largest remaining cause
                      of the host struggling with a crowd. The commands were always
-                     available by hand; this is here because the host has about ninety
-                     minutes and a queue of people waiting, and radius-vs-diameter is
-                     the easiest thing in this area to get wrong. -->
+                     available by hand; this is here because a host setting up under
+                     time pressure, with people waiting, will not want to think about
+                     radius-vs-diameter — the easiest thing here to get wrong. -->
                 <Border Grid.Row="2" x:Name="PregenCard" Style="{StaticResource Card}"
                         Margin="0,0,0,10" Visibility="Collapsed">
                     <StackPanel>

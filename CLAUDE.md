@@ -34,12 +34,12 @@ distances are launcher-owned so existing servers pick the tuning up too. The
 **client** is tuned separately — its own G1 flag set aimed at frame smoothness, and
 the harmful `-Xmn128M` inherited from the PowerShell version is gone.
 
-**Crowd tuning (15-20 players):** entity broadcast 75%, packet compression off,
+**Crowd tuning (a couple of dozen players):** entity broadcast 75%, packet compression off,
 simulation distance 6 — all launcher-owned, so existing servers pick them up too.
 The Server tab warns if Windows is capping the processor (99% max state turns turbo
 off), and the console reports the server's own "Can't keep up!" warnings, which is
 the honest test of host versus client. Hardware is **not** the limit — the hosts are
-Xeon Gold 6244s, a high-clock 8-core part that suits Minecraft well. **The worlds
+high-clock 8-core workstation parts, which is the right shape for Minecraft. **The worlds
 are not pre-generated, and that is the real remaining cause.**
 
 **Pre-generation is now a panel in the server console** (`Core/ChunkyPregen.cs`):
@@ -137,7 +137,8 @@ had a stray local server to be misled by.
 **Current build: 1.2.265.81** — 2026-09-22, carrying pre-generation, the mod loader
 checks (family *and* version), the player list, Modrinth mod downloading and Fabric
 loader updating. At the repo root and in
-`C:\Users\Zach\Minecraft-Launcher-Update.zip` (56.2 MB, verified byte-for-byte). Host machine only — everyone else pulls it over the LAN. Confirmed
+the rollout zip kept outside the repo (56.2 MB, verified byte-for-byte). Host
+machine only — everyone else pulls it over the LAN. Confirmed
 able to serve it: the root build advertises all 6 files with gzip and hands back its
 own exe byte-for-byte.
 
