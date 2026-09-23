@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A plain console runner, deliberately: no test-framework package, so this needs
+    no NuGet restore, downloads nothing, and costs nothing but its own bin/obj.
+    `dotnet run` is the whole story, and the exit code is the result.
+
+    It compiles Core/ directly rather than referencing the launcher, and leaves
+    UseWPF off. That is not a shortcut — it is what enforces the project's own rule
+    that Core/ has no UI dependency: put a WPF type in Core and this project stops
+    compiling and says so.
+
+    The framework is net10.0-windows because Core reads the registry, which is
+    Windows-only; plain net10.0 compiles but warns on every such call. Windows-only
+    is honest here — the launcher is a WPF app. UseWPF stays off, so the enforcement
+    above is unaffected.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>MinecraftLauncher.Tests</AssemblyName>
+    <RootNamespace>MinecraftLauncher.Tests</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Keeps the footprint down: no satellite resources, no extra copies. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="Suites\*.cs" />
+    <Compile Include="..\MinecraftLauncher\Core\*.cs" LinkBase="Core" />
+  </ItemGroup>
+
+</Project>
