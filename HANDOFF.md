@@ -357,6 +357,24 @@ including where WebView2 is loaded from — depends on it.
     made by a machine that can download and carried to ones that cannot. It declares
     its Minecraft and loader version in a manifest, is refused if built for a
     different Minecraft version, and **cannot write outside the version folder**.
+  - **Servers as well as clients**, since 2026-09-23. The window has a CLIENT/SERVER
+    choice and everything follows it. This matters because the two are not variations
+    on each other: a client keeps its loader in a profile JSON, while a server has no
+    profile at all and records the version in `install.properties` **inside
+    `server.jar`**, which the Fabric server launcher reads. So a server is updated by
+    replacing that jar — dropping newer libraries beside the old ones changes nothing,
+    because the jar still asks for the version baked into it. A server pack carries
+    `server.jar` and the whole `libraries/` tree (53 files here), and deliberately
+    leaves out `versions/<mc>/server-<mc>.jar`: that is Minecraft, it is not
+    redistributable, and it does not change with the loader. Packs carry a `target`
+    field and each side refuses the other's; packs made before this read as client
+    packs, which is what they were. `Core/FabricServerLoader.cs`.
+  - **A server's reported loader now comes from the jar, not the folder names.**
+    `LoaderVersions` took the newest folder under
+    `libraries/net/fabricmc/fabric-loader/`, which says what was installed last rather
+    than what starts — the same mistake the client side made sorting profiles by name.
+    Found because MAKE A PACK never worked for servers: this one had 0.19.2 and 0.19.3
+    stacked while its clients ran 0.19.5.
   - Forge and NeoForge are deliberately not offered: their loader is baked into the
     profile their installer generates and cannot be swapped underneath an install.
 - **Updates are mandatory, and install themselves** — `Core/UpdateEnforcement.cs`,

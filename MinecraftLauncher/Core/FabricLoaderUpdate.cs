@@ -29,15 +29,47 @@ namespace MinecraftLauncher.Core
         public const string ManifestName = "fabric-loader-pack.json";
 
         /// <summary>What a pack contains, read from its manifest.</summary>
+        /// <remarks>
+        /// <paramref name="ForServer"/> defaults to false so that packs made before
+        /// servers were supported still read as what they are — client packs — rather
+        /// than being refused or, worse, unpacked over a server.
+        /// </remarks>
         public sealed record PackInfo(
             string MinecraftVersion,
             string LoaderVersion,
             int FileCount,
-            long Bytes)
+            long Bytes,
+            bool ForServer = false)
         {
             public string Describe() =>
                 $"Fabric loader {LoaderVersion} for Minecraft {MinecraftVersion} " +
+                $"({(ForServer ? "server" : "client")}) " +
                 $"— {FileCount} files, {Bytes / 1024.0 / 1024.0:0.#} MB";
+        }
+
+        /// <summary>
+        /// Writes the manifest that marks a zip as ours and says what it is for.
+        /// </summary>
+        /// <remarks>
+        /// Shared with <see cref="FabricServerLoader"/> so the two pack kinds cannot
+        /// drift into describing themselves differently — the <c>target</c> field is
+        /// the only thing stopping a server pack being unpacked over a client.
+        /// </remarks>
+        internal static void WriteManifest(
+            ZipArchive zip, string mcVersion, string loaderVersion, int files, bool forServer)
+        {
+            string manifest = JsonSerializer.Serialize(new
+            {
+                minecraft = mcVersion,
+                loader = loaderVersion,
+                target = forServer ? "server" : "client",
+                files,
+                created = DateTime.UtcNow.ToString("u")
+            }, new JsonSerializerOptions { WriteIndented = true });
+
+            var entry = zip.CreateEntry(ManifestName);
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write(manifest);
         }
 
         /// <summary>Loader versions Fabric offers for this Minecraft version, newest first.</summary>
@@ -274,17 +306,7 @@ namespace MinecraftLauncher.Core
                     count++;
                 }
 
-                var manifest = JsonSerializer.Serialize(new
-                {
-                    minecraft = mcVersion,
-                    loader = loaderVersion,
-                    files = count,
-                    created = DateTime.UtcNow.ToString("u")
-                }, new JsonSerializerOptions { WriteIndented = true });
-
-                var entry = zip.CreateEntry(ManifestName);
-                using var writer = new StreamWriter(entry.Open());
-                writer.Write(manifest);
+                WriteManifest(zip, mcVersion, loaderVersion, count, forServer: false);
             }, ct);
 
             File.Move(temp, zipPath, overwrite: true);
@@ -314,7 +336,11 @@ namespace MinecraftLauncher.Core
                     root.TryGetProperty("minecraft", out var mc) ? mc.GetString() ?? "" : "",
                     root.TryGetProperty("loader", out var l) ? l.GetString() ?? "" : "",
                     zip.Entries.Count(e => e.Name.Length > 0) - 1,
-                    zip.Entries.Sum(e => e.Length));
+                    zip.Entries.Sum(e => e.Length),
+                    // Absent in packs made before servers were supported, and those
+                    // were all client packs.
+                    root.TryGetProperty("target", out var t) &&
+                        string.Equals(t.GetString(), "server", StringComparison.OrdinalIgnoreCase));
             }
             catch
             {
@@ -332,6 +358,11 @@ namespace MinecraftLauncher.Core
             var info = Inspect(zipPath)
                 ?? throw new InvalidDataException(
                     "That file is not a Fabric loader pack made by this launcher.");
+
+            if (info.ForServer)
+                throw new InvalidDataException(
+                    "That is a server pack. A client needs a pack made from a client — the two " +
+                    "hold different files and are not interchangeable.");
 
             if (!info.MinecraftVersion.Equals(mcVersion, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException(

@@ -83,12 +83,25 @@ namespace MinecraftLauncher.Core
         }
 
         /// <summary>
-        /// Fabric servers keep each loader they have ever had under
-        /// <c>libraries/net/fabricmc/fabric-loader/</c>, so an upgraded server has
-        /// several. The newest is the one in use.
+        /// A Fabric server's loader version, from the jar that decides it.
         /// </summary>
+        /// <remarks>
+        /// Servers keep every loader they have ever had under
+        /// <c>libraries/net/fabricmc/fabric-loader/</c>, so the folders say what has
+        /// been installed, not what runs: this server had 0.19.2 and 0.19.3 side by
+        /// side. The answer is in <c>install.properties</c> inside <c>server.jar</c>,
+        /// which is what the Fabric server launcher reads. Guessing the newest folder
+        /// is the same mistake the client side made sorting profiles by name, and it
+        /// would misreport a server the moment new libraries landed without a new jar.
+        ///
+        /// The folder scan stays as a fallback for a server whose jar cannot be read.
+        /// </remarks>
         private static Installed FabricServer(string version, string loaderType)
         {
+            string? fromJar = FabricServerLoader.InstalledVersion(version);
+            if (fromJar is not null)
+                return new Installed(loaderType, fromJar, "server.jar install.properties");
+
             string dir = Path.Combine(Paths.ServerDir(loaderType, version),
                                       "libraries", "net", "fabricmc", "fabric-loader");
 

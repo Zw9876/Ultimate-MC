@@ -10,40 +10,89 @@ namespace MinecraftLauncher.UI
 {
     /// <summary>
     /// Updating a version's Fabric loader in place, either from the internet or from a
-    /// pack carried in by hand.
+    /// pack carried in by hand — for the client or for the server.
     /// </summary>
     /// <remarks>
     /// Reinstalling a whole Minecraft version to get a newer loader is a long download
     /// these machines cannot make, and it would take the mods and worlds with it. Only
     /// the loader profile and its libraries change here.
+    ///
+    /// Client and server are genuinely different jobs, not one job with two paths: a
+    /// client's loader lives in a profile JSON, a server's is recorded inside
+    /// <c>server.jar</c>. This window used to do only the client half, so MAKE A PACK
+    /// silently produced a client pack however you got here, and the servers drifted —
+    /// this one had accumulated loaders 0.19.2 and 0.19.3 while its clients ran 0.19.5.
     /// </remarks>
     public partial class LoaderUpdateWindow : Window
     {
         private readonly string _mcVersion;
+        private readonly bool _hasServer;
         private CancellationTokenSource? _work;
+        private bool _ready;
 
         /// <summary>True when the installed loader changed, so the caller can refresh.</summary>
         public bool Changed { get; private set; }
+
+        /// <summary>Whether the server, rather than the client, is being updated.</summary>
+        private bool Server => ServerRadio.IsChecked == true;
 
         public LoaderUpdateWindow(string mcVersion)
         {
             InitializeComponent();
 
             _mcVersion = mcVersion;
+            _hasServer = FabricServerLoader.Exists(mcVersion);
+
+            if (!_hasServer)
+            {
+                ServerRadio.IsEnabled = false;
+                ServerRadio.ToolTip = $"There is no Fabric server for {mcVersion} on this machine.";
+            }
+
+            _ready = true;
             ShowCurrent();
 
             Loaded += (_, _) => Log($"Minecraft {_mcVersion}. Nothing has been changed yet.");
         }
 
+        private void Target_Changed(object sender, RoutedEventArgs e)
+        {
+            // Fires once from InitializeComponent, before anything exists to update.
+            if (!_ready) return;
+
+            // The version list was fetched for the other target's benefit; the builds on
+            // offer are the same, but leaving it selected invites installing to the
+            // thing that was not being looked at.
+            OnlineVersionCombo.ItemsSource = null;
+            InstallOnlineButton.IsEnabled = false;
+
+            ShowCurrent();
+            StatusLabel.Text = "";
+            Log(Server ? "Now updating the SERVER." : "Now updating the CLIENT.");
+        }
+
         private void ShowCurrent()
         {
-            var installed = LoaderVersions.Detect(_mcVersion, server: false, "Fabric");
-            var all = FabricLoaderUpdate.InstalledLoaders(_mcVersion);
+            var all = Server
+                ? FabricServerLoader.InstalledLoaders(_mcVersion)
+                : FabricLoaderUpdate.InstalledLoaders(_mcVersion);
+
+            string what = Server ? "server" : "client";
+
+            var installed = LoaderVersions.Detect(_mcVersion, Server, "Fabric");
 
             CurrentLabel.Text = installed.Known
-                ? $"Minecraft {_mcVersion} is running Fabric loader {installed.Version}." +
+                ? $"The {what} for Minecraft {_mcVersion} is running Fabric loader {installed.Version}." +
                   (all.Count > 1 ? $"  Also present: {string.Join(", ", all.Skip(1))}." : "")
-                : $"Minecraft {_mcVersion} has no Fabric loader installed yet.";
+                : $"The {what} for Minecraft {_mcVersion} has no Fabric loader installed yet.";
+
+            TargetNote.Text = _hasServer
+                ? (Server ? "servers\\fabric-" + _mcVersion : "versions\\" + _mcVersion)
+                : "No Fabric server for this version on this machine.";
+
+            ExportButton.ToolTip = Server
+                ? "Packages this server's loader — server.jar and its libraries"
+                : "Packages this client's loader — the profile and the libraries it names";
         }
 
         private void Log(string line) =>
@@ -91,14 +140,23 @@ namespace MinecraftLauncher.UI
         {
             if (OnlineVersionCombo.SelectedItem is not string chosen) return;
 
-            var existing = FabricLoaderUpdate.InstalledLoaders(_mcVersion)
+            bool server = Server;
+            string what = server ? "server" : "client";
+
+            var existing = (server
+                    ? FabricServerLoader.InstalledLoaders(_mcVersion)
+                    : FabricLoaderUpdate.InstalledLoaders(_mcVersion))
                 .Where(v => v != chosen).ToList();
 
             var answer = MessageBox.Show(
-                $"Install Fabric loader {chosen} for Minecraft {_mcVersion}?\n\n" +
+                $"Install Fabric loader {chosen} for the {what} on Minecraft {_mcVersion}?\n\n" +
                 (existing.Count > 0
                     ? $"This REPLACES the loader you have now ({string.Join(", ", existing)}), " +
                       "which is removed once the new one is in place.\n\n"
+                    : "") +
+                (server
+                    ? "The server fetches the new loader's libraries the next time it starts, " +
+                      "so it needs internet once more after this.\n\n"
                     : "") +
                 "Only the loader changes. The game, your worlds and your mods are " +
                 "left exactly as they are.",
@@ -106,19 +164,26 @@ namespace MinecraftLauncher.UI
 
             if (answer != MessageBoxResult.Yes) return;
 
-            Busy(true, $"Installing Fabric loader {chosen}...");
+            Busy(true, $"Installing Fabric loader {chosen} for the {what}...");
 
             try
             {
                 _work = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-                await FabricLoaderUpdate.InstallOnlineAsync(_mcVersion, chosen, Reporter, _work.Token);
+
+                if (server)
+                    await FabricServerLoader.InstallOnlineAsync(_mcVersion, chosen, Reporter, _work.Token);
+                else
+                    await FabricLoaderUpdate.InstallOnlineAsync(_mcVersion, chosen, Reporter, _work.Token);
 
                 Changed = true;
                 ShowCurrent();
 
-                var left = FabricLoaderUpdate.InstalledLoaders(_mcVersion);
+                var left = server
+                    ? FabricServerLoader.InstalledLoaders(_mcVersion)
+                    : FabricLoaderUpdate.InstalledLoaders(_mcVersion);
+
                 StatusLabel.Text = left.Count == 1
-                    ? $"Fabric loader {chosen} installed, and it is now the only one."
+                    ? $"Fabric loader {chosen} installed for the {what}, and it is now the only one."
                     : $"Fabric loader {chosen} installed. Still present: {string.Join(", ", left)}.";
             }
             catch (Exception ex)
@@ -136,11 +201,17 @@ namespace MinecraftLauncher.UI
 
         private async void Export_Click(object sender, RoutedEventArgs e)
         {
-            var installed = FabricLoaderUpdate.InstalledLoaders(_mcVersion);
+            bool server = Server;
+            string what = server ? "server" : "client";
+
+            var installed = server
+                ? FabricServerLoader.InstalledLoaders(_mcVersion)
+                : FabricLoaderUpdate.InstalledLoaders(_mcVersion);
+
             if (installed.Count == 0)
             {
                 MessageBox.Show(
-                    $"There is no Fabric loader installed for {_mcVersion} to package.",
+                    $"There is no Fabric loader installed for the {what} on {_mcVersion} to package.",
                     "Make a pack", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
@@ -149,22 +220,29 @@ namespace MinecraftLauncher.UI
 
             var save = new Microsoft.Win32.SaveFileDialog
             {
-                Title = "Save the loader pack",
-                FileName = $"fabric-loader-{loader}-{_mcVersion}.zip",
+                Title = $"Save the {what} loader pack",
+                // The kind is in the name because the two are not interchangeable and
+                // both end up on a USB stick together.
+                FileName = $"fabric-loader-{loader}-{_mcVersion}-{what}.zip",
                 Filter = "Loader pack (*.zip)|*.zip"
             };
             if (save.ShowDialog(this) != true) return;
 
-            Busy(true, $"Packaging Fabric loader {loader}...");
+            Busy(true, $"Packaging the {what}'s Fabric loader {loader}...");
 
             try
             {
                 _work = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-                var info = await FabricLoaderUpdate.ExportAsync(
-                    _mcVersion, loader, save.FileName, Reporter, _work.Token);
+
+                var info = server
+                    ? await FabricServerLoader.ExportAsync(
+                        _mcVersion, save.FileName, Reporter, _work.Token)
+                    : await FabricLoaderUpdate.ExportAsync(
+                        _mcVersion, loader, save.FileName, Reporter, _work.Token);
 
                 StatusLabel.Text = $"Made a pack: {info.Describe()}";
-                Log("Copy that file to the other machines and use OPEN A PACK there.");
+                Log($"Copy that file to the other machines and use OPEN A PACK there, " +
+                    $"with {what.ToUpperInvariant()} selected.");
             }
             catch (Exception ex)
             {
@@ -179,6 +257,8 @@ namespace MinecraftLauncher.UI
 
         private async void Import_Click(object sender, RoutedEventArgs e)
         {
+            bool server = Server;
+
             var open = new Microsoft.Win32.OpenFileDialog
             {
                 Title = "Open a Fabric loader pack",
@@ -198,6 +278,19 @@ namespace MinecraftLauncher.UI
                 return;
             }
 
+            // Caught here as well as in Core so the message can name the fix rather
+            // than just the fault.
+            if (info.ForServer != server)
+            {
+                MessageBox.Show(
+                    $"That is a {(info.ForServer ? "server" : "client")} pack, but " +
+                    $"{(server ? "SERVER" : "CLIENT")} is selected.\n\n" +
+                    "The two hold different files and cannot be swapped. Either choose " +
+                    $"{(info.ForServer ? "SERVER" : "CLIENT")} above, or open the other pack.",
+                    "Open a pack", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
             var answer = MessageBox.Show(
                 $"{info.Describe()}\n\nInstall it for Minecraft {_mcVersion}?\n\n" +
                 "Only the loader is written. Your worlds and mods are left alone.",
@@ -210,8 +303,12 @@ namespace MinecraftLauncher.UI
             try
             {
                 _work = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-                var done = await FabricLoaderUpdate.ImportAsync(
-                    _mcVersion, open.FileName, Reporter, _work.Token);
+
+                var done = server
+                    ? await FabricServerLoader.ImportAsync(
+                        _mcVersion, open.FileName, Reporter, _work.Token)
+                    : await FabricLoaderUpdate.ImportAsync(
+                        _mcVersion, open.FileName, Reporter, _work.Token);
 
                 Changed = true;
                 ShowCurrent();
@@ -240,6 +337,9 @@ namespace MinecraftLauncher.UI
             ImportButton.IsEnabled = !busy;
             ExportButton.IsEnabled = !busy;
             InstallOnlineButton.IsEnabled = !busy && OnlineVersionCombo.SelectedItem is string;
+
+            ClientRadio.IsEnabled = !busy;
+            ServerRadio.IsEnabled = !busy && _hasServer;
 
             Cursor = busy ? Cursors.Wait : null;
             if (message is not null) StatusLabel.Text = message;

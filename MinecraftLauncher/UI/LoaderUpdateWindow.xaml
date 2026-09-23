@@ -12,6 +12,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -19,11 +20,33 @@
         <TextBlock Grid.Row="0" Text="Update Fabric loader"
                    Style="{StaticResource TabTitle}" Margin="0,0,0,6"/>
 
-        <TextBlock Grid.Row="1" x:Name="CurrentLabel" Margin="0,0,0,16"
+        <TextBlock Grid.Row="1" x:Name="CurrentLabel" Margin="0,0,0,12"
                    Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
 
-        <!-- ══ online ══ -->
+        <!-- ══ what is being updated ══
+             A client and a server keep their loader in completely different places,
+             so everything below depends on this choice. -->
         <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="WHAT TO UPDATE" Style="{StaticResource SectionLabel}"/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <RadioButton x:Name="ClientRadio" Content="Client" IsChecked="True"
+                                 GroupName="Target" Margin="0,0,24,0" VerticalAlignment="Center"
+                                 Foreground="{StaticResource TextBrush}"
+                                 Checked="Target_Changed"/>
+                    <RadioButton x:Name="ServerRadio" Content="Server"
+                                 GroupName="Target" VerticalAlignment="Center"
+                                 Foreground="{StaticResource TextBrush}"
+                                 Checked="Target_Changed"/>
+                    <TextBlock x:Name="TargetNote" Margin="24,0,0,0" VerticalAlignment="Center"
+                               Foreground="{StaticResource MutedBrush}" FontSize="11"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- ══ online ══ -->
+        <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,0,0,12">
             <StackPanel>
                 <TextBlock Text="FROM THE INTERNET" Style="{StaticResource SectionLabel}"/>
                 <TextBlock x:Name="OnlineNote" Foreground="{StaticResource MutedBrush}"
@@ -53,7 +76,7 @@
         </Border>
 
         <!-- ══ offline ══ -->
-        <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,0,0,12">
+        <Border Grid.Row="4" Style="{StaticResource Card}" Margin="0,0,0,12">
             <StackPanel>
                 <TextBlock Text="FROM SUPPLIED FILES" Style="{StaticResource SectionLabel}"/>
                 <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11"
@@ -80,7 +103,7 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="4" Style="{StaticResource Card}" Padding="2">
+        <Border Grid.Row="5" Style="{StaticResource Card}" Padding="2">
             <TextBox x:Name="LogBox" IsReadOnly="True" Background="Transparent"
                      BorderThickness="0" Foreground="{StaticResource TextBrush}"
                      FontFamily="Consolas, Courier New" FontSize="11"
@@ -88,7 +111,7 @@
                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
         </Border>
 
-        <Grid Grid.Row="5" Margin="0,14,0,0">
+        <Grid Grid.Row="6" Margin="0,14,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
