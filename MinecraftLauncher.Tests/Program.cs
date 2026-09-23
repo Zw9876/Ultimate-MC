@@ -34,6 +34,7 @@ namespace MinecraftLauncher.Tests
                 new("players",    false, () => Task.Run(PlayerRosterTests.Run)),
                 new("loader",     false, () => Task.Run(LoaderVersionTests.Run)),
                 new("replace",    false, () => Task.Run(LoaderReplaceTests.Run)),
+                new("enforce",    false, () => Task.Run(UpdateEnforcementTests.Run)),
                 new("packs",      false, FabricPackTests.RunAsync),
                 new("modrinth",   true,  ModrinthTests.RunAsync)
             };

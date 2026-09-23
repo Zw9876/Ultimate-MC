@@ -20,11 +20,20 @@ namespace MinecraftLauncher.Tests
     public static class FabricPackTests
     {
         private const string Mc = "26.1.2";
-        private const string Loader = "0.19.3";
+
+        /// <summary>
+        /// Whichever loader is installed right now, rather than a version written into
+        /// the test. Hardcoding one meant this suite broke the moment the real loader
+        /// was updated — a failure that said nothing about the code it covers.
+        /// </summary>
+        private static string Loader = "";
 
         public static async Task RunAsync()
         {
             if (!LocalInstall.Available) { Skip("fabric packs", "real installs not reachable"); return; }
+
+            Loader = FabricLoaderUpdate.InstalledLoaders(Mc).FirstOrDefault() ?? "";
+            if (Loader.Length == 0) { Skip("fabric packs", $"no Fabric loader installed for {Mc}"); return; }
 
             var ct = new CancellationTokenSource(TimeSpan.FromMinutes(5)).Token;
             var quiet = new Progress<string>(_ => { });

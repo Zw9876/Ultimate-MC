@@ -122,6 +122,7 @@ namespace MinecraftLauncher.UI
             // so this asks the LAN, and the answer must never hold up the window.
             _ = CheckForUpdateAsync();
             StartUpdateWatch();
+            ListenForUpdateExit();
         }
 
         /// <summary>
@@ -130,6 +131,39 @@ namespace MinecraftLauncher.UI
         /// everyone else has opened their launcher — so a single check at startup
         /// would miss it for everybody.
         /// </summary>
+        /// <summary>
+        /// Closes this window when something else needs to replace the executable.
+        /// </summary>
+        /// <remarks>
+        /// Windows will not overwrite a running exe, so the background update watcher
+        /// asks every other copy to leave before it swaps. Ignoring that would make
+        /// the swap fail silently fifteen times and then start a second launcher.
+        /// </remarks>
+        private void ListenForUpdateExit()
+        {
+            try
+            {
+                var request = UpdateEnforcement.OpenExitForUpdateEvent();
+
+                ThreadPool.RegisterWaitForSingleObject(request, (_, _) =>
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        // Not if this window is the one installing; it closes itself.
+                        if (_applyingUpdate) return;
+
+                        // Reusing the flag that suppresses the "you are hosting"
+                        // warning: this close was not the user's doing.
+                        _applyingUpdate = true;
+                        Close();
+                    }),
+                    null, Timeout.Infinite, executeOnlyOnce: true);
+            }
+            catch
+            {
+                // The swap script retries for a while; it may still get through.
+            }
+        }
+
         private void StartUpdateWatch()
         {
             _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(3) };
@@ -1969,32 +2003,26 @@ namespace MinecraftLauncher.UI
             if (_pendingUpdate is null) return;
             var check = _pendingUpdate;
 
-            string hostingNote = _skinServer?.IsRunning == true
-                ? "\n\nThis launcher is hosting the skin server. Updating closes it, " +
-                  "which drops custom skins for anyone playing right now."
-                : "";
-
-            var answer = MessageBox.Show(
-                $"Update the launcher to version {check.RemoteVersion}?\n\n" +
-                $"From: {check.HostAddress}\n" +
-                $"Download: {check.TotalBytes / 1024.0 / 1024:N0} MB\n\n" +
-                "Your versions, servers, skins and settings are not touched. The " +
-                "launcher closes and reopens once the update is installed." + hostingNote,
-                "Update launcher",
-                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
-
-            if (answer != MessageBoxResult.Yes) return;
-
+            // No confirmation: updates are mandatory, and this button only brings
+            // forward what the background watcher would do within a couple of minutes.
             UpdateButton.IsEnabled = false;
             try
             {
                 var progress = new Progress<string>(m => UpdateDetail.Text = m);
                 await LauncherUpdate.DownloadAsync(check, progress);
 
+                // Claim the swap before anyone else can start one, then clear the way:
+                // Windows will not replace a running exe, and the background watcher
+                // and any game watcher are running from this same file.
+                _applyingUpdate = true;
+                UpdateDetail.Text = "Closing the other launcher processes…";
+
+                UpdateEnforcement.AskEveryoneToExit();
+                UpdateEnforcement.WaitForOthersToExit(TimeSpan.FromSeconds(20));
+
                 // Everything is verified on disk before anything is replaced, so a
                 // failure above leaves the installed launcher exactly as it was.
                 LauncherUpdate.Apply();
-                _applyingUpdate = true;
                 Application.Current.Shutdown();
             }
             catch (Exception ex)

@@ -359,6 +359,27 @@ including where WebView2 is loaded from — depends on it.
     different Minecraft version, and **cannot write outside the version folder**.
   - Forge and NeoForge are deliberately not offered: their loader is baked into the
     profile their installer generates and cannot be swapped underneath an install.
+- **Updates are mandatory, and install themselves** — `Core/UpdateEnforcement.cs`,
+  `UI/UpdateWatcher.cs`, `UI/UpdateCountdownWindow.cs`. A room full of launchers on
+  different versions is what this ends.
+  - A hidden copy of the exe (`--watch-updates`) **outlives the launcher window**,
+    which matters because the launcher closes at PLAY — for most of a session there
+    was nothing running that could notice an update. It checks immediately, then every
+    two minutes, and is started by the launcher rather than by anything in Windows'
+    startup.
+  - It **downloads first, then counts down** for 10 seconds. A countdown that ends in
+    a two-minute transfer would be a countdown that lied, and a failed download passes
+    unnoticed instead of interrupting someone for nothing. There is no way to refuse;
+    closing the window does not cancel it.
+  - **Windows will not replace a running executable**, and by update time there may be
+    a launcher window, a game watcher and the update watcher all running from that one
+    file. So a named event asks every other copy to leave and the installer waits for
+    them before swapping. Without it the swap fails silently fifteen times and then
+    starts a *second* launcher.
+  - **Both names are scoped to the install folder**, not the machine — see section 11.
+  - It writes `update-watcher.log` beside the exe, one line per check. On machines
+    nobody can look at remotely, "it did not update" has several very different causes
+    and this is the only way to tell them apart.
 - **Live player list** — a PLAYERS panel in the server console showing who is on and
   how long they have been on, assembled from the server's own join and leave lines
   and corrected by the reply to `list`. `Core/PlayerRoster.cs`. The count also sits
@@ -582,7 +603,7 @@ committed here is world-readable the moment it is pushed.
 
 The port is complete and shipping. Rollout is no longer a problem: the machines
 run 1.2.x, they detect updates over the LAN, and only the host needs a new build
-by hand. Current build at the repo root and in the rollout zip: **1.2.265.140**
+by hand. Current build at the repo root and in the rollout zip: **1.2.265.376**
 (the zip is kept outside the repo — see section 8).
 
 **Cleared 2026-09-22.** The user ran both on the real machines and reported them
@@ -959,6 +980,19 @@ Do not "restore fidelity" on these — the PowerShell behavior was wrong.
   against the old empty set, reported "no change", and so refreshed nothing — the
   header stayed blank when it should have said the server was empty. Going from *not
   knowing* to *knowing it is empty* is a state change even though the contents match.
+- **A `using` local disposes as soon as the method returns — and a watcher's `Run`
+  returns immediately.** The update watcher took its single-instance mutex with
+  `using var`, but `Run` only sets up a timer and hands back to WPF's message loop, so
+  the mutex was released on the spot. Every launcher then cheerfully spawned another
+  watcher and they accumulated. It is a static field now. Anything meant to live as
+  long as the process cannot be a local in a method that returns early.
+- **A machine-wide name is the wrong scope for a per-install thing.** The watcher
+  mutex and the exit-for-update event started as fixed strings. With two launcher
+  folders on one machine the second never started a watcher (the first held the
+  mutex), and updating one install asked the *other* one's launcher to close. Both are
+  now keyed to a hash of `Paths.BaseDir`. Keyed to **`Paths.BaseDir`, not
+  `LauncherPackage.Dir`** — they are the same folder in every shipped path, but only
+  the former follows the test override, so two installs can be told apart in a test.
 - **An owned WPF window is a child of its OWNER in the UI Automation tree, not of the
   desktop.** `new ModBrowserWindow { Owner = this }.ShowDialog()` produces a window
   that `RootElement.FindFirst(Children, …)` never finds — by process id or by name,
@@ -1016,7 +1050,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **308 checks, about 4.5 seconds.**
+`MinecraftLauncher.Tests/` — **340 checks, about 4.5 seconds.**
 
 ```powershell
 tools\run-tests.ps1                 # everything
@@ -1087,6 +1121,7 @@ remain one-off runs.
 | Self-update, real build | the **published 126 MB launcher** advertised all 6 package files with correct sizes and hashes, and served its own exe back in full with an intact MZ header |
 | Skins tab status | driven through UI Automation on the real launcher: Start reports `running on <ip>:25567 — started from this tab.` and the button flips to Stop |
 | Loader versions | detection run against **all five real installs here** — Fabric client 0.19.3 and server 0.19.3, Forge client and server 47.4.10 (with the Minecraft version correctly stripped off the server's folder name), NeoForge server 21.1.248 — plus vanilla and a version that is not installed, both of which report nothing rather than guessing. Requirements read out of **real jars**: fabric-api's `>=0.18.4` with its JSON escapes decoded, Chunky's `[46,)` on Forge and `[21.0-beta,)` on NeoForge. A sweep of **every installed mod against its own installed loader**: 100 of 121 answerable, none needing a newer loader, none falsely flagged. Range syntax covers Maven bounds and exclusivity, Fabric `>= < ~ ^` and conjunctions, and refuses unions, nonsense and non-version words rather than answering confidently — the last two were found by this suite and fixed |
+| Mandatory updates | **two real installs on one machine, left alone**: a newer host serving over its skin server, and an older client nobody touched after starting it. The countdown appeared unprompted, the client swapped itself 1.2.265.372 → .373 **byte-for-byte identical to the host build**, staging was cleaned up, and it came back with a fresh watcher. Sixteen seconds end to end, and `update-watcher.log` records the whole sequence including the relaunched watcher correctly concluding `SameVersion`. Separately, a process-level run proving the watcher **survives the launcher closing**, stays exactly one across three launches, exits on the update request freeing the exe, and does not close a launcher started afterwards. Unit checks cover the name scoping that two installs on one machine depend on |
 | Loader replacement | a synthetic install holding a vanilla profile, a shared library and two loaders, so every case the deletion must distinguish is present: the old profile and its own jar go, while the **shared** library, the **vanilla** library and the new loader's jar all survive, and the emptied folder is pruned without taking its parent. Re-running removes nothing; asking to keep a version that is not installed removes **nothing at all** — a guard added because the first version of this deleted the only loader present. Then the real flow against live Fabric metadata: install 0.19.4, install 0.19.5, and exactly one loader remains with the file count unchanged (shared libraries kept, only the loader jar swapped) and **every library the surviving profile names still on disk** |
 | Fabric loader packs | a pack **exported from the real 26.1.2 install** (3.7 MB, 8 files) then imported into a throwaway copy that had the game but no loader: profile and all 7 libraries arrived **byte-for-byte identical** to the originals, the detector then found 0.19.3, and nothing but `versions/`, `libraries/` and the manifest was swept in. Refusals: a pack for the wrong Minecraft version, a stranger's zip, a file that is not a zip, exporting a loader that is not installed, and a zip containing `../../../escaped.txt` — which wrote nothing. Through the real UI: the window states the installed loader, INSTALL stays disabled until versions are fetched, and a live query to Fabric returned **253 loader versions for 26.1.2, newest 0.19.5** |
 | Upgrading an installed mod | against the **live API with two real Sodium builds**: installing the newer over the older reports `Replaced` and names what it turned off, one copy is left enabled, the old build survives as `.disabled`, and both builds are confirmed to share the mod id `sodium` — which is why file names cannot be trusted for this. Re-installing the same build is still `AlreadyThere`; a deliberate **downgrade** replaces the same way round; an unrelated mod (fabric-api) displaces nothing and lives alongside; and a jar copied in by hand is caught by the duplicate warning |

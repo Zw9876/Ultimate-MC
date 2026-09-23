@@ -43,13 +43,18 @@
                     BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"
                     CornerRadius="6" Margin="12,28,12,0" Padding="10,9,10,10">
                 <StackPanel>
-                    <TextBlock Text="UPDATE AVAILABLE" FontSize="10" FontWeight="Bold"
+                    <!-- Updates are mandatory: the machines drifting onto different
+                         versions is what this is here to stop. The background watcher
+                         installs it within a couple of minutes either way; this button
+                         only brings that forward. -->
+                    <TextBlock Text="UPDATE INSTALLING" FontSize="10" FontWeight="Bold"
                                Foreground="{StaticResource AccentBrush}"/>
                     <TextBlock x:Name="UpdateDetail" TextWrapping="Wrap" FontSize="11"
                                Foreground="{StaticResource MutedBrush}" Margin="0,5,0,8"/>
-                    <Button x:Name="UpdateButton" Content="Update" Height="27"
+                    <Button x:Name="UpdateButton" Content="Install now" Height="27"
                             Click="UpdateButton_Click"
-                            Style="{StaticResource PlainButton}"/>
+                            Style="{StaticResource PlainButton}"
+                            ToolTip="It installs on its own shortly; this does it immediately"/>
                 </StackPanel>
             </Border>
 

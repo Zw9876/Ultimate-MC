@@ -35,7 +35,12 @@ namespace MinecraftLauncher.Tests
                 Expect($"{label} is found", found.Version, expected);
             }
 
-            Detect("client 26.1.2 fabric", "26.1.2", false, "Fabric", "0.19.3");
+            // Not a literal: the client loader gets updated, and a test that has to be
+            // edited every time that happens tells you nothing when it fails. The real
+            // invariant is that the detector agrees with what is on disk — two separate
+            // code paths reading the same folder.
+            string installed = FabricLoaderUpdate.InstalledLoaders("26.1.2").FirstOrDefault() ?? "(none)";
+            Detect("client 26.1.2 fabric", "26.1.2", false, "Fabric", installed);
             Detect("server 26.1.2 fabric", "26.1.2", true, "Fabric", "0.19.3");
             Detect("client 1.20.1 forge", "1.20.1", false, "Forge", "47.4.10");
 

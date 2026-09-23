@@ -29,12 +29,38 @@ namespace MinecraftLauncher.UI
                 return;
             }
 
+            // Update-watcher mode: the hidden copy that keeps looking for a newer
+            // build long after the launcher window has closed. Also windowless, and
+            // for the same reasons it must never pop a dialog.
+            if (UpdateWatcher.ShouldRun(e.Args))
+            {
+                DispatcherUnhandledException += (_, args) =>
+                {
+                    args.Handled = true;
+                    Log(args.Exception);
+                    Shutdown();
+                };
+
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                base.OnStartup(e);
+                UpdateWatcher.Run(this);
+                return;
+            }
+
             base.OnStartup(e);
+
+            // A relaunch after an update arrives with the exit request still set;
+            // clearing it stops the new window closing itself immediately.
+            UpdateEnforcement.ClearExitRequest();
 
             // Opened here rather than through StartupUri in App.xaml, because watcher
             // mode must start with no window at all — and WPF on .NET 10 throws if
             // StartupUri is cleared at run time, which killed every watcher silently.
             new MainWindow().Show();
+
+            // Keeps looking for updates after this window closes, which is most of a
+            // session — the launcher shuts itself down at PLAY.
+            UpdateWatcher.SpawnIfMissing();
 
             // A portable launcher people double-click should report a problem, not
             // vanish. Anything unhandled on the UI thread becomes a dialog and a

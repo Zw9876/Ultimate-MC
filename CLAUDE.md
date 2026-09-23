@@ -120,6 +120,17 @@ nothing was numbered higher and nothing was offered. Versions are generated now.
 **Only the host needs a new build by hand; everyone else pulls it over the LAN.**
 Transfers are gzipped between two current builds: 57 MB on the wire, not 132.
 
+**Updates are now mandatory and install themselves.** A hidden watcher (`--watch-updates`)
+outlives the launcher window — which closes at PLAY, so for most of a session nothing
+was watching — checks every two minutes, downloads, shows a 10-second countdown that
+cannot be refused, and swaps. Windows will not replace a running exe, so a named event
+asks every other copy of the launcher to exit first and the installer waits for them;
+without that the swap fails silently and starts a second launcher. Both that event and
+the single-instance mutex are scoped per install folder. It writes `update-watcher.log`
+beside the exe, which is the only way to tell apart the several causes of "it did not
+update" on a machine nobody can reach. `Core/UpdateEnforcement.cs`, `UI/UpdateWatcher.cs`.
+Proven with two real installs: the client updated itself, untouched, in 16 seconds.
+
 **Self-update over the LAN** was added in 1.1.0: a launcher finds a host running a
 newer build and updates itself from it, over the skin server already running there.
 Downloads are SHA-256 verified and the user always confirms. 1.1.1 adds a version
@@ -138,9 +149,10 @@ session that proved the other two did not isolate it. Skins working for everyone
 is consistent with it, but is not the same observation: it also holds if nobody
 had a stray local server to be misled by.
 
-**Current build: 1.2.265.140** — 2026-09-22, carrying pre-generation, the mod loader
-checks (family *and* version), the player list, Modrinth mod downloading and Fabric
-loader updating. At the repo root and in
+**Current build: 1.2.265.376** — 2026-09-23. Updates are mandatory from here on, so
+this is the last build anyone copies by hand: put it on the host and every other
+machine installs it itself. Also carries pre-generation, the mod loader checks (family
+*and* version), the player list, Modrinth mod downloading and Fabric loader updating. At the repo root and in
 the rollout zip kept outside the repo (56.2 MB, verified byte-for-byte). Host
 machine only — everyone else pulls it over the LAN. Confirmed
 able to serve it: the root build advertises all 6 files with gzip and hands back its
@@ -207,7 +219,7 @@ beside the exe and finds nothing.
   compiled fine and failed at run time — a wrong Java version, a silently
   misdirected installer, a profile the scanner could not see. Launch it, drive the
   UI, read the server output.
-- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 308 checks, about
+- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 340 checks, about
   4.5 seconds, exit code 0 when clean. `-Offline` skips the network suite. Add to
   `MinecraftLauncher.Tests/Suites/` as work lands — and write the checks against
   **captured real output**, not an invented format; every parser in this project that
