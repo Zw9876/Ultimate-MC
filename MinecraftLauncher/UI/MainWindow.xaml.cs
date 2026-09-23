@@ -18,6 +18,24 @@ namespace MinecraftLauncher.UI
         private static readonly string[] ServerTypes =
             { "Vanilla", "Fabric", "Forge", "NeoForge", "Paper", "Purpur" };
 
+        /// <summary>What the Mods tab offers for a server: things that load something.</summary>
+        /// <remarks>
+        /// Vanilla is deliberately absent. It reads neither a mods folder nor a plugins
+        /// folder, so choosing it could only ever produce an empty list and a warning
+        /// saying it runs no mods. Paper and Purpur stay because they do load plugins —
+        /// <see cref="ModManager.UsesPlugins"/> already sends them to <c>plugins/</c>.
+        /// </remarks>
+        private static readonly string[] ServerModLoaders =
+            { "Fabric", "Forge", "NeoForge", "Paper", "Purpur" };
+
+        /// <summary>What the Mods tab offers for a client.</summary>
+        /// <remarks>
+        /// Shorter than the server list for the same reason it exists: Paper and Purpur
+        /// are server software, so a client cannot be either, and offering them invited
+        /// a choice that describes nothing.
+        /// </remarks>
+        private static readonly string[] ClientModLoaders = { "Fabric", "Forge", "NeoForge" };
+
         /// <summary>Client-side loaders offered on the Setup tab.</summary>
         private static readonly string[] SetupLoaders = { "None", "Fabric", "Forge", "NeoForge" };
 
@@ -215,7 +233,8 @@ namespace MinecraftLauncher.UI
             PregenShapeCombo.ItemsSource = new[] { ChunkyPregen.ShapeSquare, ChunkyPregen.ShapeCircle };
             PregenShapeCombo.SelectedIndex = 0;
 
-            ModLoaderCombo.ItemsSource = ServerTypes;
+            // The tab opens on Client; ModTarget_Changed swaps the list when it moves.
+            ModLoaderCombo.ItemsSource = ClientModLoaders;
             ModLoaderCombo.SelectedIndex = 0;
 
             SetupTypeCombo.ItemsSource = new[] { "Releases Only", "Snapshots Only", "All Versions" };
@@ -1257,7 +1276,13 @@ namespace MinecraftLauncher.UI
         // ── Mods tab ──
         private void ModTarget_Changed(object sender, RoutedEventArgs e)
         {
-            if (ModLoaderCombo is null) return;
+            // Both, not just the combo: this fires from a RadioButton's Checked during
+            // InitializeComponent, and which named fields exist by then depends on the
+            // order they appear in the XAML.
+            if (ModLoaderCombo is null || ModServerRadio is null) return;
+
+            bool server = ModServerRadio.IsChecked == true;
+            string? was = ModLoaderCombo.SelectedItem as string;
 
             // Enabled for clients too. It picks the server folder when hosting, but for
             // a client it says which loader these mods are meant for — without that the
@@ -1265,19 +1290,34 @@ namespace MinecraftLauncher.UI
             // perfectly good Fabric folder looked wrong.
             ModLoaderCombo.IsEnabled = true;
 
-            if (ModServerRadio.IsChecked != true && LoaderCombo?.SelectedItem is string clientLoader)
-            {
-                // Default to whatever the Client tab is set to play, which is the loader
-                // that will actually read this folder.
-                int match = ServerTypes.ToList()
-                    .FindIndex(t => t.Equals(clientLoader, StringComparison.OrdinalIgnoreCase));
-                if (match >= 0) ModLoaderCombo.SelectedIndex = match;
-            }
+            string[] offered = server ? ServerModLoaders : ClientModLoaders;
+            if (!ReferenceEquals(ModLoaderCombo.ItemsSource, offered))
+                ModLoaderCombo.ItemsSource = offered;
+
+            // Keep the choice when it still applies — moving Client to Server should not
+            // silently retarget someone's Fabric folder. Otherwise follow the Client tab,
+            // which is the loader that will actually read this folder.
+            int match = Array.FindIndex(offered, t => t.Equals(was, StringComparison.OrdinalIgnoreCase));
+
+            if (match < 0 && !server && LoaderCombo?.SelectedItem is string clientLoader)
+                match = Array.FindIndex(offered, t => t.Equals(clientLoader, StringComparison.OrdinalIgnoreCase));
+
+            ModLoaderCombo.SelectedIndex = match >= 0 ? match : 0;
 
             RefreshMods();
         }
 
         private void ModSelector_Changed(object sender, SelectionChangedEventArgs e) => RefreshMods();
+
+        /// <summary>The loader the Mods tab is working with.</summary>
+        /// <remarks>
+        /// The fallback used to be "Vanilla", which then had to be special-cased
+        /// downstream as the one answer that runs no mods. Nothing in either list runs
+        /// none, so the first entry is a safe default rather than a trap.
+        /// </remarks>
+        private string ModLoaderType =>
+            ModLoaderCombo?.SelectedItem as string
+            ?? (ModServerRadio?.IsChecked == true ? ServerModLoaders : ClientModLoaders)[0];
 
         private void RefreshMods()
         {
@@ -1293,7 +1333,7 @@ namespace MinecraftLauncher.UI
             }
 
             bool server = ModServerRadio.IsChecked == true;
-            string loaderType = ModLoaderCombo.SelectedItem as string ?? "Vanilla";
+            string loaderType = ModLoaderType;
 
             try
             {
@@ -1372,7 +1412,7 @@ namespace MinecraftLauncher.UI
                 return;
             }
 
-            string loaderType = ModLoaderCombo.SelectedItem as string ?? "Vanilla";
+            string loaderType = ModLoaderType;
 
             if (ModrinthApi.LoaderFacet(loaderType) is null)
             {
@@ -1411,11 +1451,132 @@ namespace MinecraftLauncher.UI
             if (updater.Changed) RefreshMods();
         }
 
+        private async void ModCheckUpdates_Click(object sender, RoutedEventArgs e)
+        {
+            if (ModVersionCombo.SelectedItem is not string version)
+            {
+                MessageBox.Show("Pick a version first.", "Check for updates",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            string loaderType = ModLoaderType;
+            if (ModrinthApi.LoaderFacet(loaderType) is null)
+            {
+                MessageBox.Show($"{loaderType} does not take mods from Modrinth.",
+                    "Check for updates", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (ModsList.ItemsSource is not List<ModEntry> rows || rows.Count == 0)
+            {
+                ModStatus.Text = "Nothing here to check.";
+                return;
+            }
+
+            // Disabled jars are deliberately left out. A turned-off mod is not running,
+            // so "newer build available" is noise, and updating it would quietly bring
+            // back something that was switched off on purpose.
+            var enabled = rows.Where(m => m.Enabled).ToList();
+            if (enabled.Count == 0)
+            {
+                ModStatus.Text = "Nothing enabled here to check.";
+                return;
+            }
+
+            ModCheckUpdatesButton.IsEnabled = false;
+            ModStatus.Text = $"Asking Modrinth about {enabled.Count} mod(s)...";
+
+            try
+            {
+                using var work = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+
+                var found = await ModrinthApi.CheckForUpdatesAsync(
+                    enabled.Select(m => (m.FileName, m.FullPath)),
+                    version, loaderType, null, work.Token);
+
+                var byPath = found.ToDictionary(r => r.FullPath, StringComparer.OrdinalIgnoreCase);
+                foreach (var row in rows)
+                    row.UpdateText = byPath.TryGetValue(row.FullPath, out var r) ? r.Text : "";
+
+                ModsList.Items.Refresh();
+
+                var updatable = found.Where(r => r.HasUpdate).ToList();
+                int unknown = found.Count(r => !r.OnModrinth);
+                string aside = unknown > 0 ? $"  {unknown} not on Modrinth." : "";
+
+                ModStatus.Text = updatable.Count == 0
+                    ? $"Everything is up to date.{aside}"
+                    : $"{updatable.Count} can be updated.{aside}";
+
+                if (updatable.Count > 0) await OfferModUpdates(updatable);
+            }
+            catch (OperationCanceledException)
+            {
+                ModStatus.Text = "The update check timed out.";
+            }
+            catch (Exception ex)
+            {
+                // The usual case on the offline machines, so name the cause.
+                ModStatus.Text = "Could not reach Modrinth: " + ex.Message;
+            }
+            finally
+            {
+                ModCheckUpdatesButton.IsEnabled = true;
+            }
+        }
+
+        private async Task OfferModUpdates(List<ModrinthApi.ModUpdateStatus> updatable)
+        {
+            const int show = 12;
+
+            string list = string.Join(Environment.NewLine, updatable.Take(show)
+                .Select(u => $"    {u.Title}:  {u.Installed!.VersionNumber} → {u.Latest!.VersionNumber}"));
+
+            if (updatable.Count > show)
+                list += $"{Environment.NewLine}    ...and {updatable.Count - show} more";
+
+            var answer = MessageBox.Show(
+                $"{updatable.Count} mod(s) have a newer build for this version:{Environment.NewLine}{Environment.NewLine}" +
+                list + Environment.NewLine + Environment.NewLine +
+                "Install them now?" + Environment.NewLine + Environment.NewLine +
+                "The build you have is turned off rather than deleted, so going back is one click.",
+                "Update mods", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.Yes) return;
+
+            int done = 0, failed = 0;
+            using var work = new CancellationTokenSource(TimeSpan.FromMinutes(20));
+
+            foreach (var u in updatable)
+            {
+                if (u.Latest?.File is null) { failed++; continue; }
+
+                ModStatus.Text = $"Updating {u.Title}...";
+
+                try
+                {
+                    var result = await ModrinthApi.InstallAsync(u.Latest.File, _modsFolder, work.Token);
+                    if (result.Status == ModrinthApi.InstallStatus.Failed) failed++; else done++;
+                }
+                catch (Exception)
+                {
+                    // One mod failing must not abandon the rest.
+                    failed++;
+                }
+            }
+
+            RefreshMods();
+            ModStatus.Text = failed == 0
+                ? $"Updated {done} mod(s). Check for updates again to confirm."
+                : $"Updated {done}, {failed} failed.";
+        }
+
         private void ModFix_Click(object sender, RoutedEventArgs e)
         {
             if (_modsFolder.Length == 0) return;
 
-            string loaderType = ModLoaderCombo.SelectedItem as string ?? "Vanilla";
+            string loaderType = ModLoaderType;
             var wrong = ModManager.List(_modsFolder)
                 .Where(m => m.Enabled && !ModInspector.IsCompatible(m.Loaders, loaderType))
                 .ToList();

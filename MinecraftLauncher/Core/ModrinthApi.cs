@@ -24,7 +24,7 @@ namespace MinecraftLauncher.Core
     /// Modrinth publishes, using the same verified path as every other download in
     /// this launcher.
     /// </remarks>
-    public static class ModrinthApi
+    public static partial class ModrinthApi
     {
         private const string Root = "https://api.modrinth.com/v2";
 

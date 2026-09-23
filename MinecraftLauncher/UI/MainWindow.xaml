@@ -615,6 +615,8 @@
                                             DisplayMemberBinding="{Binding LoaderText}"/>
                             <GridViewColumn Header="Size" Width="100"
                                             DisplayMemberBinding="{Binding SizeText}"/>
+                            <GridViewColumn Header="Update" Width="170"
+                                            DisplayMemberBinding="{Binding UpdateText}"/>
                         </GridView>
                     </ListView.View>
                 </ListView>
@@ -624,6 +626,10 @@
                             Width="140" Height="32" Margin="0,0,8,0"
                             Click="ModGetOnline_Click" Style="{StaticResource PlainButton}"
                             ToolTip="Search Modrinth for mods that fit this version and loader, and install them straight into this folder"/>
+                    <Button x:Name="ModCheckUpdatesButton" Content="Check for updates"
+                            Width="140" Height="32" Margin="0,0,8,0"
+                            Click="ModCheckUpdates_Click" Style="{StaticResource PlainButton}"
+                            ToolTip="Ask Modrinth whether any mod here has a newer build for this version and loader"/>
                     <Button x:Name="ModLoaderUpdateButton" Content="Update loader…"
                             Width="130" Height="32" Margin="0,0,8,0"
                             Click="ModLoaderUpdate_Click" Style="{StaticResource PlainButton}"

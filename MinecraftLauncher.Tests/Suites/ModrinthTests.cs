@@ -40,7 +40,95 @@ namespace MinecraftLauncher.Tests
             await VersionsAndDependencies(ct);
             await Installing(ct);
             await Upgrading(ct);
+            await UpdateChecking(ct);
             Names();
+        }
+
+        /// <summary>
+        /// Asking whether installed mods have newer builds, against the real folder.
+        /// </summary>
+        /// <remarks>
+        /// Identity is the jar's SHA-1, not its name, so this is only meaningful
+        /// against files Modrinth has actually seen — which the real mods folder is
+        /// full of. Nothing is written: the check only reads and asks.
+        /// </remarks>
+        private static async Task UpdateChecking(CancellationToken ct)
+        {
+            Section("checking installed mods for updates");
+
+            const string mc = "26.1.2";
+            string folder = LocalInstall.At("versions", mc, "mods");
+
+            if (!LocalInstall.Available || !Directory.Exists(folder))
+            {
+                Skip("update checking", "the real mods folder is not here");
+                return;
+            }
+
+            var jars = Directory.GetFiles(folder, "*.jar")
+                                .Select(p => (FileName: Path.GetFileName(p), FullPath: p))
+                                .ToList();
+
+            if (jars.Count == 0) { Skip("update checking", "no mods installed"); return; }
+
+            Note($"{jars.Count} enabled jars in {mc}");
+
+            var found = await ModrinthApi.CheckForUpdatesAsync(jars, mc, "Fabric", null, ct);
+
+            Expect("every jar comes back with an answer", found.Count, jars.Count);
+
+            int known = found.Count(r => r.OnModrinth);
+            int updatable = found.Count(r => r.HasUpdate);
+            Note($"recognised by Modrinth: {known}/{found.Count}; newer build offered for {updatable}");
+
+            // A real folder of popular mods must not read as entirely unknown — that
+            // would mean the hash lookup itself is broken rather than the mods being
+            // obscure.
+            Check("Modrinth recognises most of them", known > found.Count / 2, $"{known} of {found.Count}");
+
+            foreach (var r in found.Where(r => r.OnModrinth).Take(3))
+                Note($"{r.Title}: {r.Text}");
+
+            // The two states that must never be confused. An unknown jar saying
+            // "up to date" would be a lie, and it is the failure that matters most:
+            // it tells someone nothing needs doing when nobody actually checked.
+            Check("an unknown jar never claims to be up to date",
+                  found.Where(r => !r.OnModrinth).All(r => r.Text == "not on Modrinth"));
+
+            Check("nothing claims an update without both builds to compare",
+                  found.Where(r => r.HasUpdate).All(r => r.Installed is not null && r.Latest is not null));
+
+            Check("an update really is a different build, not the same one twice",
+                  found.Where(r => r.HasUpdate).All(r => r.Latest!.Id != r.Installed!.Id));
+
+            Check("every offered update has a file to download",
+                  found.Where(r => r.HasUpdate).All(r => r.Latest!.File is not null));
+
+            // Whatever Modrinth returns has to fit what was asked for, or the "update"
+            // would install a mod for the wrong loader or the wrong game version.
+            var wrongTarget = found.Where(r => r.HasUpdate && r.Latest!.File is not null)
+                                   .Where(r => r.Latest!.File!.FileName.Length == 0).ToList();
+            Check("offered files are named", wrongTarget.Count == 0, $"{wrongTarget.Count} unnamed");
+
+            Check("the hash is what was looked up",
+                  found.All(r => r.Sha1.Length == 40 && r.Sha1.All(Uri.IsHexDigit)),
+                  found.FirstOrDefault(r => r.Sha1.Length != 40)?.Sha1 ?? "");
+
+            // Asking about a folder of nothing must not throw or invent answers.
+            var empty = await ModrinthApi.CheckForUpdatesAsync(
+                Array.Empty<(string, string)>(), mc, "Fabric", null, ct);
+            Expect("an empty folder gives an empty answer", empty.Count, 0);
+
+            // Vanilla has no Modrinth loader, so this has to refuse rather than query.
+            try
+            {
+                await ModrinthApi.CheckForUpdatesAsync(jars.Take(1), mc, "Vanilla", null, ct);
+                Check("it refuses a loader that runs no mods", false, "it tried anyway");
+            }
+            catch (InvalidOperationException)
+            {
+                Check("it refuses a loader that runs no mods", true);
+            }
         }
 
         private static void Mapping()

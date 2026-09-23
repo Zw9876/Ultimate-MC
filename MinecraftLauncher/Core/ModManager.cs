@@ -20,6 +20,16 @@ namespace MinecraftLauncher.Core
         public string StateText  => Enabled ? "On" : "Off";
         public string SizeText   => $"{SizeKb:0.#} KB";
         public string LoaderText => ModInspector.Describe(Loaders);
+
+        /// <summary>
+        /// What a Modrinth update check said about this file. Blank until one is run.
+        /// </summary>
+        /// <remarks>
+        /// Settable, unlike everything above it, because it is answered by a network
+        /// call long after the row exists. Blank means "not asked", which is not the
+        /// same as "up to date" and must not be shown as though it were.
+        /// </remarks>
+        public string UpdateText { get; set; } = "";
     }
 
     public sealed class ModAddResult

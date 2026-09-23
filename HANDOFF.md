@@ -281,6 +281,31 @@ including where WebView2 is loaded from — depends on it.
     NeoForge rather than guessed at, because NeoForge used that file up to 1.20.1.
   - A jar declaring nothing is left alone — plenty of legitimate library jars carry
     no descriptor, and disabling those would break working setups.
+- **Mod update checking** — "Check for updates" on the Mods tab asks Modrinth whether
+  anything installed has a newer build for the selected version and loader, and fills
+  in an **Update** column (`0.5.12 → 0.6.0`, `up to date`, `not on Modrinth`). Offers
+  to install them all through the same path as a normal install, so the build being
+  replaced is turned off rather than deleted. `Core/ModrinthApi.Updates.cs`.
+  - **Identity is the jar's SHA-1, not its file name.** Authors rename files freely
+    and the same build arrives under different names, so a name is not an identity.
+    The hash is what Modrinth itself indexes by.
+  - **Two requests for the whole folder**, not one per mod: `POST /version_files`
+    says what each hash *is*, `POST /version_files/update` says what the newest build
+    for that loader and game version *would be*, both keyed by hash. Chunked at 100.
+  - **A jar Modrinth has never seen reads as "not on Modrinth", never "up to date".**
+    Hand-built and private jars are legitimately unknown, and telling someone nothing
+    needs doing when nobody actually checked is the failure that matters here. Covered
+    by the `modrinth` suite against the real folder: 33 of 35 recognised, 18 outdated.
+  - Disabled jars are skipped. A turned-off mod is not running, so a newer build is
+    noise, and updating it would quietly reinstate something switched off on purpose.
+
+- **The Mods tab no longer offers Vanilla** (2026-09-23). It reads neither a mods nor
+  a plugins folder, so choosing it could only produce an empty list and a warning
+  saying it runs no mods — and the code carried a `?? "Vanilla"` fallback that then
+  had to be special-cased downstream. The same mistake sat one row over: Paper and
+  Purpur were offered as *client* loaders, which is impossible. Client now offers
+  Fabric / Forge / NeoForge; server adds Paper and Purpur, which do load plugins.
+
 - **Mod downloading from Modrinth** — a "Get mods online…" button on the Mods tab
   opens a browser filtered to the version and loader already selected, and installs
   straight into that folder. `Core/ModrinthApi.cs`, `UI/ModBrowserWindow.xaml`.
