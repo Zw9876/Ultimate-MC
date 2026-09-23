@@ -1359,6 +1359,48 @@ update is a new binary with a hash nothing in the world has seen. Reporting one
 build as a false positive clears that build. The next one starts from zero.
 Anything that fixes this durably has to attach to the publisher, not the file.
 
+### It is not the file's content (2026-09-23, measured)
+
+The host flagged the zip **after the download from Google Drive completed** — "Virus
+detected", and the file could not be touched. That is a different mechanism from a
+scan of a file sitting on disk, and the difference matters because it decides the fix.
+
+Scanned on the build machine with `MpCmdRun -Scan -ScanType 3 -DisableRemediation`
+(reports without quarantining), against signatures 1.459.362.0:
+
+| Scanned | Verdict |
+|---|---|
+| `Minecraft-Launcher-Update.zip` | no threats |
+| `MinecraftLauncher.exe` | no threats |
+| A copy of the zip stamped with **Mark of the Web** (`ZoneId=3`, referrer `drive.google.com`) | no threats |
+
+So **no signature matches this build**, and a plain on-demand scan on the host would
+most likely also come back clean. The verdict at download time is a **cloud
+reputation call** — an unsigned 126 MB program with essentially zero prevalence
+anywhere in the world — made in the download path, not by the local engine. It does
+not reproduce by scanning the same bytes afterwards.
+
+That points at settings rather than content. Worth comparing on the host:
+`CloudBlockLevel` is **0** (default) on the build machine; at High or above, Defender
+blocks low-prevalence files aggressively and this is exactly what it is built to
+catch. `Get-DefenderDetection.ps1` prints it.
+
+**The practical consequence: do not download it.** A USB stick or a LAN copy carries
+no Mark of the Web and never enters the download-scanning path, so none of this
+applies. Downloading it from cloud storage is the only step that has ever failed.
+
+### Do not ship the only diagnostic inside the payload
+
+`Why-was-this-blocked.cmd` went into the rollout zip, which is the one file that
+could not be downloaded — so it was unreachable exactly when it was needed. It is
+also in `tools/` in this repo, which is public, and that is the copy to fetch when
+the zip will not come down:
+
+```
+https://raw.githubusercontent.com/Zw9876/Ultimate-MC/main/tools/Why-was-this-blocked.cmd
+https://raw.githubusercontent.com/Zw9876/Ultimate-MC/main/tools/Get-DefenderDetection.ps1
+```
+
 ### What was already done about it
 
 Two changes that cost nothing and remove signals (commit after 1b8a7ad):
