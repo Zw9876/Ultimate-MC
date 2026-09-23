@@ -1305,3 +1305,89 @@ outside the new border is pushed in and takes damage — check where people have
 first. And if fresh worlds get started fairly often, the cheapest habit is to
 pre-generate a new one while it is still empty, rather than retrofitting one people
 already live in.
+
+---
+
+## 15. Antivirus: why Defender flags the launcher, and what to do
+
+**Symptom (2026-09-23):** Microsoft Defender quarantines the rollout zip, or the
+launcher inside it, on machines that are not this one.
+
+### Why it happens
+
+Nothing is wrong with the file. The launcher's honest description and a dropper's
+honest description are the same sentence:
+
+- an **unsigned** 125.8 MB executable with no reputation anywhere,
+- that **downloads a new copy of itself** from another machine over plain HTTP,
+- writes a script that **waits for a process to exit, overwrites a running
+  executable, and relaunches it**,
+- **spawns hidden background processes** (`--watch-updates`, `--watch-game`) that
+  outlive the window that started them,
+- and **opens a listening socket** plus UDP broadcast discovery.
+
+Every one of those is load-bearing, and together they are what Defender's machine
+learning is trained to catch. Detections of this shape carry names like
+`Trojan:Win32/Wacatac.B!ml` — the `!ml` suffix means a model decided, not a
+signature matched.
+
+**The part that makes it recur:** the version is generated per build, so *every*
+update is a new binary with a hash nothing in the world has seen. Reporting one
+build as a false positive clears that build. The next one starts from zero.
+Anything that fixes this durably has to attach to the publisher, not the file.
+
+### What was already done about it
+
+Two changes that cost nothing and remove signals (commit after 1b8a7ad):
+
+- **The version resource is filled in.** `CompanyName`, `ProductName`,
+  `FileDescription` and `LegalCopyright` were the assembly name repeated and a
+  copyright of one space — the default shape, which real software rarely has and
+  malware usually does. Set in the csproj.
+- **The swap script moved out of `%TEMP%`.** It was
+  `mc-launcher-update-<guid>.bat` in the temp folder, run hidden through `cmd.exe`.
+  It is now `update-swap.cmd` beside the launcher, same content, falling back to
+  `%TEMP%` only if the install folder is read-only. A randomly named batch file in
+  the temp folder that overwrites an executable is close to the textbook description
+  of a dropper; in the install folder under its own name it is also readable after a
+  failed update. Covered by the `swap` suite, which runs the real script against
+  throwaway folders.
+
+Neither makes an unsigned binary trusted. They lower the score; they do not settle it.
+
+### The options, most to least useful
+
+| | What it fixes | Cost |
+|---|---|---|
+| **Defender path exclusion** on each machine — `tools\Set-LauncherDefenderPolicy.ps1`, as admin | Every build, permanently, including the automatic updates | Defender stops scanning that folder. Real, and the reason the script makes you ask for it |
+| **Report it to Microsoft** as a false positive | That one build, everywhere, in ~24–72h | Free, but has to be redone per build — so it is a fix for *today*, not for the design |
+| **A real code-signing certificate** (OV, ~$200–400/yr) | Reputation accrues to the signer, so it carries across rebuilds | Money, and an annual renewal |
+| **A self-signed certificate** | Little, for this purpose — Defender does not trust an unknown publisher any more than no publisher | Free, but mostly theatre here unless paired with WDAC/AppLocker policy |
+
+For a closed set of ~15–20 machines that one person owns, **the exclusion is the
+right answer** and the certificate is the right answer only if this ever leaves that
+circle.
+
+### Reporting a false positive
+
+<https://www.microsoft.com/en-us/wdsi/filesubmission> — sign in, submit
+`MinecraftLauncher.exe` (not the zip), pick "Home customer" or "Software developer",
+say it is a self-built Minecraft launcher for a private LAN that updates itself
+peer-to-peer, and give the detection name from Windows Security → Protection
+history. Turnaround is usually a day or two, and the result is a definition update
+that stops flagging **that hash**.
+
+### Before assuming any of this
+
+Get the detection name off the affected machine — it decides which fix applies:
+
+```powershell
+Get-MpThreat | Select-Object ThreatName, IsActive, @{n='File';e={$_.Resources -join '; '}}
+Get-MpThreatDetection | Sort-Object InitialDetectionTime -Descending | Select-Object -First 5
+```
+
+A name ending `!ml` is the heuristic case above. A `Behavior:Win32/...` name is
+behaviour monitoring or an ASR rule catching the swap at run time, which an
+exclusion also covers but a false-positive report does not. A specific family name
+with no `!ml` would mean something genuinely matched, and that is worth stopping to
+investigate rather than excluding.

@@ -8,6 +8,20 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>MinecraftLauncher</AssemblyName>
     <RootNamespace>MinecraftLauncher</RootNamespace>
+    <!--
+      Identity in the Win32 version resource. Not cosmetic: an unsigned executable
+      whose CompanyName, ProductName and FileDescription are all just the assembly
+      name, with an empty copyright, is a shape antivirus heuristics score against —
+      real software fills these in and malware usually does not bother. This costs
+      nothing and removes one signal. Change Company to whatever name should appear
+      in the file's Details tab.
+    -->
+    <Company>Zw9876</Company>
+    <Authors>Zw9876</Authors>
+    <Product>Minecraft Portable Launcher</Product>
+    <AssemblyTitle>Minecraft Portable Launcher</AssemblyTitle>
+    <Description>Offline LAN Minecraft launcher, skin server and update host.</Description>
+    <Copyright>Copyright © 2026 Zw9876</Copyright>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Disable auto-detection so we can point at App.xaml in the UI folder -->
     <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>

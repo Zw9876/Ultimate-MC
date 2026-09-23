@@ -265,10 +265,27 @@ namespace MinecraftLauncher.Core
             // The swap script already retries the copy for long enough to cover it.
             SessionShutdown.SignalWatchersToExit();
 
-            string scriptPath = Path.Combine(Path.GetTempPath(),
-                $"mc-launcher-update-{Guid.NewGuid():N}.bat");
+            // Beside the launcher under a fixed name, rather than a random one in
+            // %TEMP%. The work is identical; the shape is not. A hidden cmd.exe running
+            // a GUID-named .bat out of the temp folder, which then overwrites an
+            // executable and relaunches it, is what a dropper looks like, and antivirus
+            // heuristics score it as one — this launcher is unsigned, so it has no
+            // reputation to argue with. In the install folder under its own name it is
+            // also readable after a failed update, like update-watcher.log.
+            string script = BuildSwapScript();
+            string scriptPath = Path.Combine(LauncherPackage.Dir, SwapScriptName);
 
-            File.WriteAllText(scriptPath, BuildSwapScript(), new UTF8Encoding(false));
+            try
+            {
+                File.WriteAllText(scriptPath, script, new UTF8Encoding(false));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // An install folder that cannot be written to is not worth failing an
+                // update over — the script only has to run from somewhere.
+                scriptPath = Path.Combine(Path.GetTempPath(), SwapScriptName);
+                File.WriteAllText(scriptPath, script, new UTF8Encoding(false));
+            }
 
             Process.Start(new ProcessStartInfo
             {
@@ -278,6 +295,13 @@ namespace MinecraftLauncher.Core
                 CreateNoWindow  = true
             });
         }
+
+        /// <summary>
+        /// The swap script's filename. Fixed rather than unique: one is only ever
+        /// running at a time, it deletes itself when it finishes, and a leftover from a
+        /// failed update is overwritten by the next one rather than accumulating.
+        /// </summary>
+        internal const string SwapScriptName = "update-swap.cmd";
 
         /// <summary>
         /// Copies one stream into another, returning the SHA-256 of what went through.

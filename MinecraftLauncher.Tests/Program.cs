@@ -37,6 +37,7 @@ namespace MinecraftLauncher.Tests
                 new("loader",     false, () => Task.Run(LoaderVersionTests.Run)),
                 new("replace",    false, () => Task.Run(LoaderReplaceTests.Run)),
                 new("enforce",    false, () => Task.Run(UpdateEnforcementTests.Run)),
+                new("swap",       false, () => Task.Run(SwapScriptTests.Run)),
                 new("packs",      false, FabricPackTests.RunAsync),
                 new("modrinth",   true,  ModrinthTests.RunAsync)
             };

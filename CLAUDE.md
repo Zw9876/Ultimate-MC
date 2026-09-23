@@ -50,6 +50,7 @@ Outstanding work is HANDOFF.md section 10.
 | Gotchas + fixed reference bugs | 11 |
 | Running with no internet | 12 |
 | Testing: the test project + what's covered | 13 |
+| Antivirus flagging the launcher | 15 |
 
 ## Build
 
