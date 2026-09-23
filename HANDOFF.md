@@ -537,13 +537,26 @@ DLLs where higher settings cost minutes and save little.
 
 ---
 
-## 9. GitHub repo
+## 9. Git
 
-- URL: https://github.com/Zw9876/Minecraft-Portable-Launcher
-- Tracked files: `MinecraftLauncher-Standalone.ps1`, `README.md`, `.gitignore`, `LICENSE`
-- The `.gitignore` excludes runtime/versions/servers/skins/config and all user state.
-- Releases: distribute the runnable bundle (exe + runtime) as a zip asset; the
-  repo itself stays code-only.
+**This repo is a local backup, not a published project.** The remote
+(`https://github.com/Zw9876/Ultimate-MC.git`) exists but the user's instruction is
+that the work stays on their machine — **commit freely, do not push** unless they
+ask for that specifically.
+
+- Everything lives on `main`; there is no branching workflow.
+- The `.gitignore` excludes `runtime/`, `versions/`, `servers/`, `skins/`, `cache/`,
+  `config/`, all build output, and the published launcher at the repo root (the
+  126 MB exe and its `*_cor3.dll` siblings). A full commit of the source is ~1.4 MB.
+- **A bare clone does not build, by design.** The csproj references WebView2 from
+  `runtime\webview2\` rather than NuGet, so the project builds on a machine with no
+  package feed — which is the common case here. The cost is that `runtime/` has to be
+  present, and it is excluded for being large and not distributable. Restore it from
+  a working copy or the distributable zip before building a fresh clone. Nothing in
+  `Core/` has this problem, so `MinecraftLauncher.Tests` builds and runs from a bare
+  clone on its own.
+- Releases, if ever wanted: distribute the runnable bundle (exe + runtime) as a zip
+  asset; the repo itself stays code-only.
 
 ---
 
