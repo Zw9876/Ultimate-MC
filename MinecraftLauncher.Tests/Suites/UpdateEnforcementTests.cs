@@ -101,10 +101,13 @@ namespace MinecraftLauncher.Tests
                   UpdateEnforcement.PollInterval.TotalMinutes is > 0 and <= 5,
                   UpdateEnforcement.PollInterval.ToString());
 
-            // Long enough to read, short enough that nobody waits around.
+            // Long enough to read, short enough that nobody waits around. Read into a
+            // local first: CountdownSeconds is a const, so testing it directly folds at
+            // compile time and warns that the pattern always matches.
+            int countdown = UpdateEnforcement.CountdownSeconds;
             Check("the countdown is a sensible length",
-                  UpdateEnforcement.CountdownSeconds is >= 5 and <= 30,
-                  UpdateEnforcement.CountdownSeconds.ToString());
+                  countdown is >= 5 and <= 30,
+                  countdown.ToString());
         }
     }
 }

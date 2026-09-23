@@ -1100,11 +1100,22 @@ tools\run-tests.ps1                 # everything
 tools\run-tests.ps1 -Offline        # skip the suites needing the internet
 tools\run-tests.ps1 loader mods     # only matching suites
 tools\run-tests.ps1 -List           # names only
+tools\run-tests.ps1 -ShowAll        # a line per check even when piped
+tools\run-tests.ps1 -Quiet          # failures and the summary only
 ```
 
 Suites: `versions`, `mods`, `chunky`, `players`, `loader`, `replace`, `enforce`,
 `packs`, `modrinth` (the last needs internet). Exit code is 0 only when everything
 passed.
+
+**How much it prints depends on who is reading.** In a terminal it prints a line per
+check, as it always did. Piped into a file, a log or a tool that captures output it
+prints only failures and the count — 359 lines become 2. `Harness.Quiet` defaults to
+`Console.IsOutputRedirected`; `--verbose` and `--quiet` (`-ShowAll` / `-Quiet` on the
+wrapper) force it. Nothing is withheld either way: a failure prints where it happens
+*and* in the summary, with its suite name. This exists because the suites are run
+before and after every `Core/` change, and a few hundred "ok" lines say nothing the
+final count does not — while costing real money when an assistant is reading them.
 
 ### The scripts that test the running application
 

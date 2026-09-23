@@ -25,21 +25,42 @@ namespace MinecraftLauncher.Tests
         /// <summary>The suite being run, for failure messages.</summary>
         public static string CurrentSuite { get; set; } = "";
 
+        /// <summary>
+        /// Print only failures and the summary, rather than a line per check.
+        /// </summary>
+        /// <remarks>
+        /// Defaults to whether the output is being piped somewhere rather than read by
+        /// a person. Run it in a terminal and it says everything it always did; run it
+        /// from a script — or from a tool that captures the output — and several hundred
+        /// lines of "ok" are noise, because a passing check tells the reader nothing
+        /// that the final count does not. Nothing is withheld: a failure still prints
+        /// where it happens and again in the summary. <c>--verbose</c> and
+        /// <c>--quiet</c> override it either way.
+        /// </remarks>
+        public static bool Quiet { get; set; } = Console.IsOutputRedirected;
+
         public static void Section(string title)
         {
+            if (Quiet) return;
+
             Console.WriteLine();
             Write($"== {title} ==", ConsoleColor.Yellow);
         }
 
         /// <summary>Prints a fact rather than asserting one — context for the reader.</summary>
-        public static void Note(string text) => Console.WriteLine($"     {text}");
+        public static void Note(string text)
+        {
+            if (Quiet) return;
+
+            Console.WriteLine($"     {text}");
+        }
 
         public static void Check(string what, bool ok, string? detail = null)
         {
             if (ok)
             {
                 Passed++;
-                Write($"  ok    {what}", ConsoleColor.Green);
+                if (!Quiet) Write($"  ok    {what}", ConsoleColor.Green);
                 return;
             }
 
@@ -50,6 +71,8 @@ namespace MinecraftLauncher.Tests
         /// <summary>For a check whose subject could not be reached at all.</summary>
         public static void Skip(string what, string why)
         {
+            if (Quiet) return;
+
             Write($"  skip  {what}  ({why})", ConsoleColor.DarkGray);
         }
 

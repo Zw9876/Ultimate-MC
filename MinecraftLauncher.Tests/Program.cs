@@ -14,6 +14,8 @@ namespace MinecraftLauncher.Tests
     ///   dotnet run -- --offline       skip the ones that need the internet
     ///   dotnet run -- loader mods     only suites whose name contains these
     ///   dotnet run -- --list          names only
+    ///   dotnet run -- --verbose       a line per check even when piped
+    ///   dotnet run -- --quiet         failures and the summary only
     ///
     /// These were rebuilt from scratch in every session before this one, which is the
     /// whole reason the project exists. What they cover is listed in HANDOFF.md
@@ -49,6 +51,12 @@ namespace MinecraftLauncher.Tests
             bool offline = args.Contains("--offline");
             var wanted = args.Where(a => !a.StartsWith("--")).ToList();
 
+            // Left alone, this follows whether anything is reading the output; see
+            // Harness.Quiet. Asking for both is not worth an error — verbose wins,
+            // because someone passing it wants to see more, not less.
+            if (args.Contains("--quiet")) Harness.Quiet = true;
+            if (args.Contains("--verbose")) Harness.Quiet = false;
+
             var chosen = suites
                 .Where(s => wanted.Count == 0 || wanted.Any(w => s.Name.Contains(w, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
@@ -64,16 +72,20 @@ namespace MinecraftLauncher.Tests
                 Console.WriteLine("NOTE: the real installs are not reachable; suites that read them will skip.\n");
 
             var clock = Stopwatch.StartNew();
+            var ran = new List<string>();
+            var skipped = new List<string>();
 
             foreach (var suite in chosen)
             {
                 if (offline && suite.NeedsInternet)
                 {
-                    Console.WriteLine($"\n### {suite.Name} — skipped (--offline)");
+                    skipped.Add(suite.Name);
+                    if (!Harness.Quiet) Console.WriteLine($"\n### {suite.Name} — skipped (--offline)");
                     continue;
                 }
 
-                Console.WriteLine($"\n################ {suite.Name} ################");
+                ran.Add(suite.Name);
+                if (!Harness.Quiet) Console.WriteLine($"\n################ {suite.Name} ################");
                 Harness.CurrentSuite = suite.Name;
 
                 try
@@ -88,6 +100,12 @@ namespace MinecraftLauncher.Tests
                                   $"{ex.GetType().Name}: {ex.Message}");
                 }
             }
+
+            // Quiet mode prints no per-suite banner, so without this a clean run could
+            // not be told apart from one where a filter matched nothing much.
+            if (Harness.Quiet)
+                Console.WriteLine($"\nran: {string.Join(", ", ran)}" +
+                                  (skipped.Count == 0 ? "" : $"   skipped: {string.Join(", ", skipped)}"));
 
             return Harness.Summarise(clock.Elapsed);
         }
