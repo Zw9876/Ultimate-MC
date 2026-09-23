@@ -43,3 +43,5 @@ version_manifest_v2.json
 *.log
 *.tmp
 Thumbs.db
+# Written by tools\Why-was-this-blocked.cmd on whichever machine it is run.
+antivirus-report.txt

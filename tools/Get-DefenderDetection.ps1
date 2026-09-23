@@ -18,13 +18,23 @@
 # means it was caught doing something at run time, so excluding the folder helps
 # but reporting it as a false positive will not.
 
-param([int]$Last = 5)
+# ADMIN IS NOT NEEDED. Everything that matters — the threat name, what it caught
+# and where — reads fine as an ordinary user. Only the list of existing exclusions
+# needs elevation, and this does not print it.
+#
+# -Full keeps whole resource strings instead of trimming them for the console. The
+# .cmd wrapper passes it, because its output goes to a file where length is free.
+
+param(
+    [int]$Last = 5,
+    [switch]$Full
+)
 
 $line = '=' * 68
 
-Write-Host $line
-Write-Host " Defender state"
-Write-Host $line
+Write-Output $line
+Write-Output " Defender state"
+Write-Output $line
 
 $s = Get-MpComputerStatus
 '{0,-26}: {1}' -f 'Tamper protection', $s.IsTamperProtected
@@ -38,17 +48,17 @@ $p = Get-MpPreference
 '{0,-26}: {1}' -f 'Cloud block level', $p.CloudBlockLevel
 '{0,-26}: {1}' -f 'PUA protection', $p.PUAProtection
 
-Write-Host ''
-Write-Host $line
-Write-Host " Named threats"
-Write-Host $line
+Write-Output ''
+Write-Output $line
+Write-Output " Named threats"
+Write-Output $line
 
 $threats = @(Get-MpThreat -ErrorAction SilentlyContinue)
 if ($threats.Count -eq 0) {
-    Write-Host ' none recorded on this machine'
+    Write-Output ' none recorded on this machine'
 } else {
     foreach ($t in $threats) {
-        Write-Host ''
+        Write-Output ''
         '{0,-14}: {1}' -f 'Name', $t.ThreatName
         '{0,-14}: {1}' -f 'Severity', $t.SeverityID
         '{0,-14}: {1}' -f 'Still active', $t.IsActive
@@ -57,38 +67,40 @@ if ($threats.Count -eq 0) {
     }
 }
 
-Write-Host ''
-Write-Host $line
-Write-Host " Detections, newest first"
-Write-Host $line
+Write-Output ''
+Write-Output $line
+Write-Output " Detections, newest first"
+Write-Output $line
 
 $det = @(Get-MpThreatDetection -ErrorAction SilentlyContinue |
          Sort-Object InitialDetectionTime -Descending |
          Select-Object -First $Last)
 
 if ($det.Count -eq 0) {
-    Write-Host ' none recorded'
-    Write-Host ''
-    Write-Host ' If a DOWNLOAD was blocked but nothing is listed here, it was'
-    Write-Host ' SmartScreen in the browser, not Defender. Look in the browser''s'
-    Write-Host ' own downloads list instead - that is a different fix.'
+    Write-Output ' none recorded'
+    Write-Output ''
+    Write-Output ' If a DOWNLOAD was blocked but nothing is listed here, it was'
+    Write-Output ' SmartScreen in the browser, not Defender. Look in the browser''s'
+    Write-Output ' own downloads list instead - that is a different fix.'
 } else {
     foreach ($d in $det) {
-        Write-Host ''
+        Write-Output ''
         '{0,-14}: {1}' -f 'When', $d.InitialDetectionTime
         '{0,-14}: {1}' -f 'Threat ID', $d.ThreatID
         '{0,-14}: {1}' -f 'Action ok', $d.ActionSuccess
         '{0,-14}: {1}' -f 'Process', $d.ProcessName
         foreach ($r in @($d.Resources)) {
-            # The resource can be a whole command line, which is worth seeing in
-            # full but is not worth 4000 characters of console.
-            $text = if ($r.Length -gt 300) { $r.Substring(0, 300) + ' ...[truncated]' } else { $r }
+            # A resource can be a whole command line — thousands of characters. Worth
+            # keeping in a file, not worth scrolling past in a console.
+            $text = if (-not $Full -and $r.Length -gt 300) {
+                $r.Substring(0, 300) + ' ...[truncated, use -Full]'
+            } else { $r }
             '{0,-14}: {1}' -f 'Resource', $text
         }
     }
 }
 
-Write-Host ''
-Write-Host $line
-Write-Host ' Copy everything above. The name and the resource type are what matter.'
-Write-Host $line
+Write-Output ''
+Write-Output $line
+Write-Output ' Copy everything above. The name and the resource type are what matter.'
+Write-Output $line
