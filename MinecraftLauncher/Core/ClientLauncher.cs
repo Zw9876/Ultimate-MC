@@ -66,7 +66,10 @@ namespace MinecraftLauncher.Core
             {
                 versionJson = loaderType switch
                 {
-                    "FABRIC" => Directory.GetFiles(versionsSub, "fabric-loader*.json").FirstOrDefault(),
+                    // Newest, not first: if more than one loader is installed, taking
+                    // whichever the filesystem lists first launches the older one and
+                    // makes an "update" look like it did nothing.
+                    "FABRIC" => FabricLoaderUpdate.NewestProfile(version),
                     // Profile names vary by loader and installer version, so match on
                     // content rather than a prefix — see VersionScanner.
                     "NEOFORGE" => Directory.GetFiles(versionsSub, "*.json")

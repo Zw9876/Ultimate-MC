@@ -91,9 +91,16 @@ namespace MinecraftLauncher.UI
         {
             if (OnlineVersionCombo.SelectedItem is not string chosen) return;
 
+            var existing = FabricLoaderUpdate.InstalledLoaders(_mcVersion)
+                .Where(v => v != chosen).ToList();
+
             var answer = MessageBox.Show(
                 $"Install Fabric loader {chosen} for Minecraft {_mcVersion}?\n\n" +
-                "Only the loader is downloaded. The game, your worlds and your mods are " +
+                (existing.Count > 0
+                    ? $"This REPLACES the loader you have now ({string.Join(", ", existing)}), " +
+                      "which is removed once the new one is in place.\n\n"
+                    : "") +
+                "Only the loader changes. The game, your worlds and your mods are " +
                 "left exactly as they are.",
                 "Update Fabric loader", MessageBoxButton.YesNo, MessageBoxImage.Question);
 
@@ -108,7 +115,11 @@ namespace MinecraftLauncher.UI
 
                 Changed = true;
                 ShowCurrent();
-                StatusLabel.Text = $"Fabric loader {chosen} installed.";
+
+                var left = FabricLoaderUpdate.InstalledLoaders(_mcVersion);
+                StatusLabel.Text = left.Count == 1
+                    ? $"Fabric loader {chosen} installed, and it is now the only one."
+                    : $"Fabric loader {chosen} installed. Still present: {string.Join(", ", left)}.";
             }
             catch (Exception ex)
             {

@@ -72,7 +72,8 @@ namespace MinecraftLauncher.Core
             string dir = Path.Combine(Paths.VersionDir(version), "versions");
             if (!Directory.Exists(dir)) return new Installed(loaderType, null, "no version folder");
 
-            foreach (string file in Directory.GetFiles(dir, "fabric-loader*.json"))
+            // The newest, matching what the launcher will actually run.
+            if (FabricLoaderUpdate.NewestProfile(version) is string file)
             {
                 var m = RxFabricProfile.Match(Path.GetFileNameWithoutExtension(file));
                 if (m.Success) return new Installed(loaderType, m.Groups["loader"].Value, Path.GetFileName(file));

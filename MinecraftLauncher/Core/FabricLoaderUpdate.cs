@@ -44,10 +44,180 @@ namespace MinecraftLauncher.Core
         public static Task<List<string>> AvailableAsync(string mcVersion, CancellationToken ct) =>
             FabricMeta.LoaderVersionsAsync(mcVersion, ct);
 
-        /// <summary>Downloads and installs a loader version. Needs internet.</summary>
-        public static Task InstallOnlineAsync(
-            string mcVersion, string loaderVersion, IProgress<string>? log, CancellationToken ct) =>
-            FabricMeta.InstallAsync(mcVersion, loaderVersion, log, ct);
+        /// <summary>
+        /// Downloads and installs a loader version, then removes every older one.
+        /// Needs internet.
+        /// </summary>
+        public static async Task InstallOnlineAsync(
+            string mcVersion, string loaderVersion, IProgress<string>? log, CancellationToken ct)
+        {
+            await FabricMeta.InstallAsync(mcVersion, loaderVersion, log, ct);
+            RemoveOtherLoaders(mcVersion, loaderVersion, log);
+        }
+
+        /// <summary>
+        /// Deletes every Fabric loader for this Minecraft version except the one to
+        /// keep, along with the libraries that then belong to nothing.
+        /// </summary>
+        /// <remarks>
+        /// Installing a loader used to leave the previous one in place, which was not
+        /// merely untidy: the launch path picked a profile by file order, so the game
+        /// could keep starting on the old loader while the launcher reported the new
+        /// one as installed. An update that does not replace is not an update.
+        ///
+        /// A library is removed only when **no remaining profile** still names it.
+        /// That matters because <c>versions/&lt;mc&gt;/libraries</c> also holds the
+        /// vanilla game's libraries and any Forge or NeoForge install's, and most of a
+        /// Fabric profile's list is shared with the loader it replaces. Deleting by
+        /// folder name instead would take the game with it.
+        /// </remarks>
+        public static List<string> RemoveOtherLoaders(
+            string mcVersion, string keepLoaderVersion, IProgress<string>? log)
+        {
+            var removed = new List<string>();
+
+            string versionsSub = Path.Combine(Paths.VersionDir(mcVersion), "versions");
+            string libsDir = Path.Combine(Paths.VersionDir(mcVersion), "libraries");
+            if (!Directory.Exists(versionsSub)) return removed;
+
+            string keepProfile = Path.Combine(versionsSub, $"fabric-loader-{keepLoaderVersion}-{mcVersion}.json");
+
+            // Never remove the old one until the new one is demonstrably there. A
+            // download that failed part way would otherwise leave the version with no
+            // loader at all — worse than the duplicate this exists to prevent.
+            if (!File.Exists(keepProfile))
+            {
+                log?.Report($"[SKIPPED] Fabric loader {keepLoaderVersion} is not installed, " +
+                            "so nothing was removed.");
+                return removed;
+            }
+
+            var doomed = Directory.GetFiles(versionsSub, "fabric-loader*.json")
+                .Where(f => !string.Equals(f, keepProfile, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (doomed.Count == 0) return removed;
+
+            // Everything still referenced once the doomed profiles are gone.
+            var stillNeeded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string profile in Directory.GetFiles(versionsSub, "*.json"))
+            {
+                if (doomed.Contains(profile, StringComparer.OrdinalIgnoreCase)) continue;
+
+                foreach (string relative in LibrariesOf(profile)) stillNeeded.Add(relative);
+            }
+
+            var touchedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (string profile in doomed)
+            {
+                var itsLibraries = LibrariesOf(profile);
+
+                try
+                {
+                    File.Delete(profile);
+                    removed.Add(Path.GetFileNameWithoutExtension(profile));
+                    log?.Report($"Removed {Path.GetFileName(profile)}");
+                }
+                catch (Exception ex)
+                {
+                    log?.Report($"[KEPT] {Path.GetFileName(profile)} — {ex.Message}");
+                    continue;       // its libraries are still in use by it
+                }
+
+                foreach (string relative in itsLibraries)
+                {
+                    if (stillNeeded.Contains(relative)) continue;
+
+                    string file = Path.Combine(libsDir, relative.Replace('/', Path.DirectorySeparatorChar));
+                    if (!File.Exists(file)) continue;
+
+                    try
+                    {
+                        File.Delete(file);
+                        touchedFolders.Add(Path.GetDirectoryName(file)!);
+                        log?.Report($"Removed {relative}");
+                    }
+                    catch (Exception ex)
+                    {
+                        log?.Report($"[KEPT] {relative} — {ex.Message}");
+                    }
+                }
+            }
+
+            PruneEmptyFolders(touchedFolders, libsDir);
+            return removed;
+        }
+
+        /// <summary>
+        /// Deletes folders left empty by the removal, walking up but never past the
+        /// libraries root.
+        /// </summary>
+        private static void PruneEmptyFolders(IEnumerable<string> folders, string stopAt)
+        {
+            string root = Path.GetFullPath(stopAt);
+
+            foreach (string start in folders)
+            {
+                var dir = new DirectoryInfo(start);
+
+                while (dir is not null &&
+                       dir.FullName.Length > root.Length &&
+                       dir.FullName.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        if (dir.EnumerateFileSystemInfos().Any()) break;
+                        var parent = dir.Parent;
+                        dir.Delete();
+                        dir = parent;
+                    }
+                    catch
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// The profile of the newest installed loader, or null when there is none.
+        /// </summary>
+        /// <remarks>
+        /// Used instead of "whichever file comes first", which is how the game could
+        /// end up launching an older loader than the one the launcher reported.
+        /// </remarks>
+        public static string? NewestProfile(string mcVersion)
+        {
+            string dir = Path.Combine(Paths.VersionDir(mcVersion), "versions");
+            if (!Directory.Exists(dir)) return null;
+
+            string? best = null;
+            string? bestVersion = null;
+
+            foreach (string file in Directory.GetFiles(dir, "fabric-loader*.json"))
+            {
+                string name = Path.GetFileNameWithoutExtension(file);
+                const string prefix = "fabric-loader-";
+                string suffix = "-" + mcVersion;
+
+                if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                    !name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    best ??= file;          // an oddly named one is better than nothing
+                    continue;
+                }
+
+                string version = name[prefix.Length..^suffix.Length];
+                if (bestVersion is null || MavenVersion.Compare(version, bestVersion) > 0)
+                {
+                    best = file;
+                    bestVersion = version;
+                }
+            }
+
+            return best;
+        }
 
         /// <summary>
         /// Builds a pack from a loader already installed here, for carrying to machines
@@ -197,6 +367,9 @@ namespace MinecraftLauncher.Core
                     log?.Report($"[OK] {entry.FullName}");
                 }
             }, ct);
+
+            // A pack replaces, for the same reason an online install does.
+            RemoveOtherLoaders(mcVersion, info.LoaderVersion, log);
 
             log?.Report($"Fabric loader {info.LoaderVersion} installed for {mcVersion}.");
             return info;

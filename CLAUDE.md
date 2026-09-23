@@ -80,7 +80,11 @@ a Modrinth install. Unparsable requirements say nothing rather than guessing.
 
 **The Fabric loader can be updated without reinstalling Minecraft** — "Update loader…"
 on the Mods tab. Online it lists what Fabric offers and installs it; offline it takes a
-**pack** (profile + libraries zip) made on a machine that can download. Packs declare
+**pack** (profile + libraries zip) made on a machine that can download. **Installing
+replaces**: the old profile and the libraries nothing else names are deleted, so one
+loader remains. That matters because the launch path used to take the *first* profile
+file, which sorts `0.19.2` above `0.19.3` — the game could run the old loader while the
+launcher reported the new one. Nothing is removed until the replacement is on disk. Packs declare
 what they are for, are refused for the wrong Minecraft version, and cannot write outside
 the version folder. Forge and NeoForge are not offered — their loader is baked into the
 profile their installer generates. `Core/FabricLoaderUpdate.cs`.
