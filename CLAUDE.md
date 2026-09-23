@@ -228,5 +228,9 @@ beside the exe and finds nothing.
   no NuGet feed configured; a dependency is one more way the build stops working
   offline. Do not add `UseWPF` to the test project either — its absence is what
   enforces the rule above about `Core/`.
+- **Run `tools\Verify-Publish.ps1` after every publish.** A framework-dependent build
+  at the repo root looks perfectly normal and silently refuses to serve updates; this
+  is the only thing that catches it before rollout day. `tools\Verify-AutoUpdate.ps1`
+  covers the unattended update path when that changes. See HANDOFF.md section 13.
 - **Keep HANDOFF.md updated** as work lands — sections 5, 10, 11 and 13. Update it
   there, not here.

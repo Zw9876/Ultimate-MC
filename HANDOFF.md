@@ -379,7 +379,16 @@ including where WebView2 is loaded from — depends on it.
   - **Both names are scoped to the install folder**, not the machine — see section 11.
   - It writes `update-watcher.log` beside the exe, one line per check. On machines
     nobody can look at remotely, "it did not update" has several very different causes
-    and this is the only way to tell them apart.
+    and this is the only way to tell them apart. Capped: past 64 KB it keeps the last
+    200 lines.
+  - **What it does when there is no update — measured, not assumed.** Left running
+    with nothing serving, it touches nothing at all except that log: the exe is
+    unchanged, nothing is staged, no window appears, and the log is the only file it
+    creates. Cost over three minutes: **0.4 s of CPU, 13 MB private memory, 249 bytes
+    of log.** Download and countdown sit behind two guards (`Outcome !=
+    UpdateAvailable`, then `!check.UpdateAvailable`), so neither can run otherwise.
+    What it *does* do every two minutes is look — a UDP broadcast, or one HTTP GET of
+    the host's manifest when `SKIN_SERVER=` is set — and append one line.
 - **Live player list** — a PLAYERS panel in the server console showing who is on and
   how long they have been on, assembled from the server's own join and leave lines
   and corrected by the reply to `list`. `Core/PlayerRoster.cs`. The count also sits
@@ -601,10 +610,13 @@ committed here is world-readable the moment it is pushed.
 
 ## 10. Next tasks
 
-The port is complete and shipping. Rollout is no longer a problem: the machines
-run 1.2.x, they detect updates over the LAN, and only the host needs a new build
-by hand. Current build at the repo root and in the rollout zip: **1.2.265.376**
-(the zip is kept outside the repo — see section 8).
+The port is complete and shipping. Current build at the repo root and in the rollout
+zip: **1.2.265.376** (the zip is kept outside the repo — see section 8).
+
+**This build has to reach the host by hand once, and it is the last one that does.**
+Updates became mandatory and self-installing in it (section 5), so once the host is on
+1.2.265.376 every other machine installs it on its own within a couple of minutes of
+the host starting their server. Until the host has it, nothing else changes.
 
 **Cleared 2026-09-22.** The user ran both on the real machines and reported them
 working as intended: **"shut down for everyone" reaches watchers on other
@@ -617,13 +629,28 @@ once before the host can close it for them.
 
 What is genuinely outstanding:
 
-1. **One two-machine test still pending:** discovery preferring a *remote* skin
-   server over a local one. It cannot be exercised on this box — a host here reads
-   as local — and the session that proved the other two did not isolate it. Skins
-   working for everyone is consistent with it but does not establish it: that also
-   holds if nobody had a stray local server to be misled by. To test it properly,
-   start a skin server on a client machine, leave it running, then have that
-   machine join a session the host is serving and check it resolves to the *host*.
+0. **Put 1.2.265.376 on the host.** Everything below matters less than this: it is
+   what turns rollout from a chore into something that happens by itself.
+
+1. **Run the network diagnostic on a machine where Minecraft cannot reach the
+   internet.** `tools\Diagnose-MinecraftNet.ps1` (copy the whole `tools\` folder
+   across; it finds `runtime\` itself):
+
+   ```
+   powershell -ExecutionPolicy Bypass -File tools\Diagnose-MinecraftNet.ps1 -Server <address> -Port 25565
+   ```
+
+   It runs the same connection twice — once as Windows, once as the **bundled
+   java.exe** — and that comparison is the whole diagnosis. Windows OK + Java FAIL
+   means antivirus or a firewall rule against `java.exe`, and **no amount of
+   rerouting helps**. Anything else and `tools\Relay.java` becomes useful (a plain
+   TCP relay, verified carrying real Minecraft protocol bytes).
+
+   **Strongest evidence so far:** the user found the Modrinth launcher can download
+   *mods* but not *Minecraft*. That launcher is a Rust app, not Java — so the block
+   looks like Mojang domains rather than `java.exe`. Worth confirming before
+   building anything on top of it.
+
 2. **Pre-generate the worlds.** Still the biggest remaining cause of the host
    struggling, and still operational rather than code — but no longer a matter of
    typing commands correctly under time pressure: the server console now has a
@@ -631,10 +658,26 @@ What is genuinely outstanding:
    progress (section 5). **It needs running on the real worlds.** The plan is in
    section 14 and has not changed: border first, generate past it afterwards, widen
    only into finished terrain.
-3. **~1.5 s freeze on PLAY** when no skin server is on the LAN — the UDP discovery
+
+3. **Get the other machines onto Fabric loader 0.19.5.** This machine was updated
+   on 2026-09-23; the rest are on whatever they had. Nothing installed needs it —
+   all 121 mods here are satisfied by their loaders — so this is housekeeping, not
+   urgent. Mods tab → **Update loader…** → **MAKE A PACK** here, carry the zip
+   across, **OPEN A PACK** there.
+
+4. **One two-machine test still pending:** discovery preferring a *remote* skin
+   server over a local one. It cannot be exercised on this box — a host here reads
+   as local — and the session that proved the other two did not isolate it. Skins
+   working for everyone is consistent with it but does not establish it: that also
+   holds if nobody had a stray local server to be misled by. To test it properly,
+   start a skin server on a client machine, leave it running, then have that
+   machine join a session the host is serving and check it resolves to the *host*.
+
+5. **~1.5 s freeze on PLAY** when no skin server is on the LAN — the UDP discovery
    timeout runs on the UI thread. Harmless but noticeable offline; make the launch
    path async.
-4. **Consider `spark`** if the server still falls behind once the worlds are
+
+6. **Consider `spark`** if the server still falls behind once the worlds are
    pre-generated. Nothing general is left to tune at that point; the next step is
    profiling to find the specific mod or contraption. Not installed on any server.
 
@@ -1059,8 +1102,21 @@ tools\run-tests.ps1 loader mods     # only matching suites
 tools\run-tests.ps1 -List           # names only
 ```
 
-Suites: `versions`, `mods`, `chunky`, `players`, `loader`, `packs`, `modrinth`
-(the last needs internet). Exit code is 0 only when everything passed.
+Suites: `versions`, `mods`, `chunky`, `players`, `loader`, `replace`, `enforce`,
+`packs`, `modrinth` (the last needs internet). Exit code is 0 only when everything
+passed.
+
+### The scripts that test the running application
+
+`Core/` is covered by the project above. The things that can only be checked by
+driving a real launcher live in `tools\` — they were rebuilt from scratch in several
+sessions before being kept:
+
+| Script | What it proves |
+|--------|----------------|
+| `Verify-Publish.ps1` | **Run after every publish.** Starts the root launcher, turns its skin server on, and checks the manifest endpoint serves the expected version, all 6 files, gzip, and its own exe back byte-for-byte. Catches the one silent failure: a framework-dependent build at the root answers `/launcher/manifest` with 404 and nobody finds out until rollout day. |
+| `Verify-AutoUpdate.ps1` | The whole mandatory-update path, unattended: a newer host serving, an older client nobody touches, and the client swapping itself byte-for-byte and relaunching. Needs a Debug build **and** a Release publish made at least a minute later, so the host is the newer one. |
+| `Diagnose-MinecraftNet.ps1` | Why Minecraft cannot reach the internet on a machine — see section 10. |
 
 Things worth knowing before changing it:
 
