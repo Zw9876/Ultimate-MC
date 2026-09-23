@@ -566,7 +566,9 @@ redistributable, so the launcher instead shows a list of download links —
 the *Download Versions* button on the Client tab, read from `version-links.txt`.
 Users extract a download into `versions\` themselves.
 
-Ship `DEPLOY-README.md` as `README.txt` inside it.
+Ship `DEPLOY-README.md` as `README.txt` inside it, and `tools\Fix-Antivirus.cmd`
+at the top level beside the exe — Defender flags this launcher on sight (section 15)
+and the fix is useless sitting in a repo the machines do not have.
 
 **Leave out** `computer_uuid.dat` — it is the machine's identity on LAN servers,
 so shipping one copy makes every machine the same player. `config.txt` is also
@@ -1359,7 +1361,7 @@ Neither makes an unsigned binary trusted. They lower the score; they do not sett
 
 | | What it fixes | Cost |
 |---|---|---|
-| **Defender path exclusion** on each machine — `tools\Set-LauncherDefenderPolicy.ps1`, as admin | Every build, permanently, including the automatic updates | Defender stops scanning that folder. Real, and the reason the script makes you ask for it |
+| **Defender path exclusion** on each machine — `Fix-Antivirus.cmd`, right-click → Run as administrator | Every build, permanently, including the automatic updates | Defender stops scanning that folder. Real, and the reason it is a thing you run knowingly |
 | **Report it to Microsoft** as a false positive | That one build, everywhere, in ~24–72h | Free, but has to be redone per build — so it is a fix for *today*, not for the design |
 | **A real code-signing certificate** (OV, ~$200–400/yr) | Reputation accrues to the signer, so it carries across rebuilds | Money, and an annual renewal |
 | **A self-signed certificate** | Little, for this purpose — Defender does not trust an unknown publisher any more than no publisher | Free, but mostly theatre here unless paired with WDAC/AppLocker policy |
@@ -1367,6 +1369,30 @@ Neither makes an unsigned binary trusted. They lower the score; they do not sett
 For a closed set of ~15–20 machines that one person owns, **the exclusion is the
 right answer** and the certificate is the right answer only if this ever leaves that
 circle.
+
+### Doing it on a machine
+
+Copy `tools\Fix-Antivirus.cmd` into the launcher's folder — the one holding
+`MinecraftLauncher.exe` — then right-click it and **Run as administrator**. It
+elevates itself if you just double-click, refuses to run if the launcher is not
+beside it, excludes that folder, and restores launcher files already in quarantine.
+It restores **only** files from that folder: `MpCmdRun -Restore -All` would also
+bring back anything genuinely malicious Defender had correctly caught.
+
+Ship it inside the rollout zip (section 8) so it is already on every machine.
+
+`tools\Set-LauncherDefenderPolicy.ps1` is the same change from a repo checkout, with
+`-Show` and `-Remove` for inspecting and undoing it. Use that one to take the
+exclusion back off.
+
+Two things people trip over:
+
+- **The exclusion does not un-quarantine anything.** It only stops it happening
+  again. A launcher already eaten has to be restored, which is why the script does
+  both.
+- **Excluding the folder does not stop a download being flagged.** If the zip is
+  fetched or copied to a machine before the exclusion exists, Defender can take it
+  in transit. Exclude first, copy second.
 
 ### Reporting a false positive
 
