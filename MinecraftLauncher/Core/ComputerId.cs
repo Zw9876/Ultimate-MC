@@ -1,47 +1,64 @@
 using System;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Win32;
 
 namespace MinecraftLauncher.Core
 {
     /// <summary>
-    /// Produces a stable offline UUID for this machine, derived from the
-    /// computer name via MD5 (matching the original launcher's scheme), and
-    /// cached to computer_uuid.dat so it never changes between runs.
+    /// A stable per-machine UUID, cached to computer_uuid.dat. Identity is tied to
+    /// the machine rather than the username so that renaming yourself keeps your
+    /// local player data intact.
     /// </summary>
+    /// <remarks>
+    /// This is not an anti-impersonation mechanism. Offline-mode servers derive a
+    /// joining player's UUID from the username they send and ignore the client's,
+    /// so what is passed here only affects this machine's local identity.
+    /// </remarks>
     public static class ComputerId
     {
         private static string UuidFile => Path.Combine(Paths.BaseDir, "computer_uuid.dat");
+        private static string? _cached;
 
         public static string Get()
         {
+            if (_cached is not null) return _cached;
+
             if (File.Exists(UuidFile))
             {
-                var cached = File.ReadAllText(UuidFile).Trim();
-                if (!string.IsNullOrWhiteSpace(cached)) return cached;
+                string existing = File.ReadAllText(UuidFile).Trim();
+                if (Uuid.IsValid(existing)) return _cached = existing;
             }
 
-            string uuid;
-            try
-            {
-                string name = Environment.MachineName;
-                byte[] hash = MD5.HashData(Encoding.ASCII.GetBytes(name));
-                string hex = Convert.ToHexString(hash).ToLowerInvariant(); // 32 chars
-                uuid = $"{hex.Substring(0, 8)}-{hex.Substring(8, 4)}-{hex.Substring(12, 4)}-{hex.Substring(16, 4)}-{hex.Substring(20, 12)}";
-            }
-            catch
-            {
-                uuid = Guid.NewGuid().ToString();
-            }
-
-            try { File.WriteAllText(UuidFile, uuid, new UTF8Encoding(false)); } catch { }
-            return uuid;
+            string id = Derive();
+            try { File.WriteAllText(UuidFile, id, new UTF8Encoding(false)); } catch { }
+            return _cached = id;
         }
 
         public static void Reset()
         {
+            _cached = null;
             try { if (File.Exists(UuidFile)) File.Delete(UuidFile); } catch { }
+        }
+
+        // Seeded from Windows' per-installation MachineGuid, because computer names
+        // collide readily on a LAN of default-named machines and a collision would
+        // give two people the same player identity.
+        private static string Derive()
+        {
+            string seed = MachineGuid() ?? Guid.NewGuid().ToString();
+            return Uuid.NameBased($"MinecraftPortableLauncher:{seed}:{Environment.MachineName}");
+        }
+
+        private static string? MachineGuid()
+        {
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Cryptography", writable: false);
+                return key?.GetValue("MachineGuid") as string;
+            }
+            catch { return null; }
         }
     }
 }

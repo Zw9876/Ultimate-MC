@@ -13,9 +13,43 @@ namespace MinecraftLauncher.Core
     /// newest of each, builds a relative-path classpath, attaches
     /// authlib-injector when present, and starts java.exe hidden.
     /// </summary>
+    /// <summary>Everything needed to start the game, before anything is started.</summary>
+    public sealed record ClientLaunchPlan(
+        string JavaExe,
+        string Arguments,
+        string WorkingDirectory,
+        string LoaderType,
+        string MainClass,
+        int ClasspathEntries,
+        string? SkinServerAddress = null);
+
+    /// <summary>A started game, and the skin server it was pointed at (if any).</summary>
+    public sealed record ClientLaunchResult(Process Game, string? SkinServerAddress);
+
     public static class ClientLauncher
     {
-        public static void Launch(string version, string loaderType, string username, int memory)
+        public static ClientLaunchResult Launch(string version, string loaderType, string username, int memory)
+        {
+            var plan = BuildPlan(version, loaderType, username, memory);
+
+            var game = Process.Start(new ProcessStartInfo
+            {
+                FileName = plan.JavaExe,
+                Arguments = plan.Arguments,
+                WorkingDirectory = plan.WorkingDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }) ?? throw new InvalidOperationException("The game process could not be started.");
+
+            return new ClientLaunchResult(game, plan.SkinServerAddress);
+        }
+
+        /// <summary>
+        /// Builds the launch command without running it, so it can be inspected or
+        /// run with output captured when the game fails to start.
+        /// </summary>
+        public static ClientLaunchPlan BuildPlan(
+            string version, string loaderType, string username, int memory)
         {
             string versionDir = Paths.VersionDir(version);
             string libsDir    = Path.Combine(versionDir, "libraries");
@@ -28,14 +62,20 @@ namespace MinecraftLauncher.Core
             string? versionJson = null;
             string versionsSub = Path.Combine(versionDir, "versions");
 
-            if (loaderType == "FABRIC")
-                versionJson = Directory.Exists(versionsSub)
-                    ? Directory.GetFiles(versionsSub, "fabric-loader*.json").FirstOrDefault()
-                    : null;
-            else if (loaderType == "FORGE")
-                versionJson = Directory.Exists(versionsSub)
-                    ? Directory.GetFiles(versionsSub, "forge*.json").FirstOrDefault()
-                    : null;
+            if (Directory.Exists(versionsSub))
+            {
+                versionJson = loaderType switch
+                {
+                    "FABRIC" => Directory.GetFiles(versionsSub, "fabric-loader*.json").FirstOrDefault(),
+                    // Profile names vary by loader and installer version, so match on
+                    // content rather than a prefix — see VersionScanner.
+                    "NEOFORGE" => Directory.GetFiles(versionsSub, "*.json")
+                        .FirstOrDefault(VersionScanner.IsNeoForgeProfile),
+                    "FORGE" => Directory.GetFiles(versionsSub, "*.json")
+                        .FirstOrDefault(VersionScanner.IsForgeProfile),
+                    _ => null
+                };
+            }
 
             if (versionJson == null || !File.Exists(versionJson))
             {
@@ -49,7 +89,11 @@ namespace MinecraftLauncher.Core
             var root = doc.RootElement;
 
             // ── Java version ──
-            int javaVersion = 25;
+            // Loader profiles usually omit javaVersion, inheriting it from the
+            // vanilla profile. Falling back to a fixed "newest" here picked Java 25
+            // for Minecraft 1.20.1, which wants 17; derive it from the game version
+            // instead and let the profile override when it does declare one.
+            int javaVersion = Paths.JavaMajorForMinecraft(version);
             if (root.TryGetProperty("javaVersion", out var jv) &&
                 jv.TryGetProperty("majorVersion", out var mj))
                 javaVersion = mj.GetInt32();
@@ -83,7 +127,7 @@ namespace MinecraftLauncher.Core
                 }
             }
 
-            if (loaderType is "FABRIC" or "FORGE")
+            if (loaderType is "FABRIC" or "FORGE" or "NEOFORGE")
             {
                 AddLibsFrom(root); // loader libs first
 
@@ -114,7 +158,7 @@ namespace MinecraftLauncher.Core
                 string ver = parts[2];
 
                 if (!latest.TryGetValue(key, out var existing) ||
-                    string.CompareOrdinal(ver, existing) > 0)
+                    MavenVersion.Compare(ver, existing) > 0)
                     latest[key] = ver;
             }
 
@@ -152,7 +196,7 @@ namespace MinecraftLauncher.Core
             }
 
             // ── Client jar (not for Forge) ──
-            if (loaderType != "FORGE")
+            if (loaderType is not ("FORGE" or "NEOFORGE"))
             {
                 string clientJar = Path.Combine(versionDir, "versions", $"{version}-client.jar");
                 if (File.Exists(clientJar))
@@ -167,34 +211,45 @@ namespace MinecraftLauncher.Core
                 }
             }
 
-            string classpath = string.Join(";", cp);
-
             // ── JVM args ──
+            //
+            // -Xmn128M used to be here, carried over from the PowerShell launcher. It
+            // was actively harmful: a fixed young generation overrides G1's adaptive
+            // sizing, so the collector can no longer meet its pause target, and 128 MB
+            // is far too small for a modded client — it forces constant young
+            // collections. Removing it is half the reason this feels smoother.
+            //
+            // -Xms matches -Xmx so the heap never grows mid-game, which is a stall of
+            // its own.
             var javaArgs = new List<string>
             {
                 $"-Djava.library.path=\"{natives}\"",
                 $"-Xmx{memory}G",
-                "-Xmn128M",
+                $"-Xms{memory}G",
                 $"-Dorg.lwjgl.librarypath=\"{natives}\""
             };
 
+            javaArgs.AddRange(JvmTuning.ClientGcFlags(memory));
+
             // authlib-injector (skins) — discovery + optional upload
+            string? skinServer = null;
             string aliJar = Path.Combine(Paths.Runtime, "authlib-injector", "authlib-injector.jar");
             if (File.Exists(aliJar))
             {
                 var cfg = AppConfig.Load();
                 string? addr = SkinDiscovery.Resolve(cfg);
+                skinServer = addr;
                 if (addr != null)
                 {
                     javaArgs.Insert(0, $"-javaagent:\"{aliJar}\"=http://{addr}");
                     // Best-effort push of this player's skin to the host.
-                    string model = SkinModel.Get(username);
+                    string model = SkinStore.GetModel(username);
                     SkinDiscovery.UploadSkin(addr, username, model);
                 }
             }
 
             // Forge-only JVM args from JSON
-            if (loaderType == "FORGE" &&
+            if (loaderType is "FORGE" or "NEOFORGE" &&
                 root.TryGetProperty("arguments", out var fargs) &&
                 fargs.TryGetProperty("jvm", out var fjvm) &&
                 fjvm.ValueKind == JsonValueKind.Array)
@@ -209,6 +264,25 @@ namespace MinecraftLauncher.Core
                     javaArgs.Add(processed);
                 }
             }
+
+            // Forge and NeoForge load part of their stack from the module path (-p).
+            // A jar listed there must not also appear on the classpath, or
+            // BootstrapLauncher aborts with "Module named ... was already on the
+            // JVMs module path but class-path contains it" and the game never opens.
+            var modulePathJars = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < javaArgs.Count - 1; i++)
+            {
+                if (javaArgs[i] is not ("-p" or "--module-path")) continue;
+
+                foreach (string entry in javaArgs[i + 1]
+                             .Split(';', StringSplitOptions.RemoveEmptyEntries))
+                    modulePathJars.Add(Path.GetFileName(entry.Trim().Trim('"')));
+            }
+
+            if (modulePathJars.Count > 0)
+                cp.RemoveAll(entry => modulePathJars.Contains(Path.GetFileName(entry)));
+
+            string classpath = string.Join(";", cp);
 
             javaArgs.Add("-cp");
             javaArgs.Add($"\"{classpath}\"");
@@ -227,7 +301,7 @@ namespace MinecraftLauncher.Core
                 "--userType", "legacy"
             };
 
-            if (loaderType == "FORGE" &&
+            if (loaderType is "FORGE" or "NEOFORGE" &&
                 root.TryGetProperty("arguments", out var gargs) &&
                 gargs.TryGetProperty("game", out var ggame) &&
                 ggame.ValueKind == JsonValueKind.Array)
@@ -239,16 +313,9 @@ namespace MinecraftLauncher.Core
 
             string argsString = string.Join(" ", javaArgs.Concat(gameArgs));
 
-            // ── Launch java.exe hidden, working dir = BaseDir (relative cp resolves) ──
-            var psi = new ProcessStartInfo
-            {
-                FileName = javaExe,
-                Arguments = argsString,
-                WorkingDirectory = Paths.BaseDir,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            Process.Start(psi);
+            // Working dir is BaseDir so the relative classpath entries resolve.
+            return new ClientLaunchPlan(
+                javaExe, argsString, Paths.BaseDir, loaderType, mainClass, cp.Count, skinServer);
         }
     }
 }

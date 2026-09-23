@@ -11,6 +11,28 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Disable auto-detection so we can point at App.xaml in the UI folder -->
     <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <!-- Icon baked into the exe: Explorer, Alt-Tab and a pinned taskbar entry
+         all read it from here, so it must not depend on a loose file. -->
+    <ApplicationIcon>..\minecraft.ico</ApplicationIcon>
+    <!--
+      The version is generated, not typed, and that is deliberate. Clients compare it
+      against the host they discover, and equal versions are ignored on purpose, so a
+      build that ships without a bump can never be offered as an update. That happened
+      once already: the server-console build went out still calling itself 1.1.0, and
+      the update feature looked broken while behaving exactly as designed.
+
+      Build   = whole days since 2026-01-01.
+      Revision = minutes since midnight UTC.
+
+      Both stay well under the 65535 limit for an assembly version part, and the pair
+      only ever increases — at midnight the day advances as the minutes reset. Bump
+      VersionPrefix by hand for a release people should notice; everything else takes
+      care of itself.
+    -->
+    <VersionPrefix>1.2</VersionPrefix>
+    <BuildDays>$([System.DateTime]::UtcNow.Subtract($([System.DateTime]::Parse("2026-01-01"))).Days)</BuildDays>
+    <BuildMinutes>$([System.Convert]::ToInt32($([System.DateTime]::UtcNow.TimeOfDay.TotalMinutes)))</BuildMinutes>
+    <Version>$(VersionPrefix).$(BuildDays).$(BuildMinutes)</Version>
   </PropertyGroup>
 
   <!--
@@ -25,6 +47,35 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+  </ItemGroup>
+
+  <!-- Same icon embedded as a WPF resource so the window can use it for its
+       title bar and running taskbar button without needing the .ico on disk. -->
+  <ItemGroup>
+    <Resource Include="..\minecraft.ico" Link="minecraft.ico"/>
+  </ItemGroup>
+
+  <!--
+    WebView2 powers the 3D skin preview. Referenced from the bundled runtime folder
+    rather than NuGet so the project still builds on a machine with no package feed,
+    and so the SDK version always matches the Fixed Version runtime shipped beside
+    it in runtime\webview2runtime.
+
+    Private=false means these are used for compilation only and are never copied to
+    the output or publish directory: they stay in runtime\webview2\ as the single
+    copy, matching the PowerShell launcher's layout. Core\WebView2Resolver.cs loads
+    them from there at run time. Do not set Private=true — that reintroduces
+    duplicates at the exe's root.
+  -->
+  <ItemGroup>
+    <Reference Include="Microsoft.Web.WebView2.Core">
+      <HintPath>..\runtime\webview2\Microsoft.Web.WebView2.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.Web.WebView2.Wpf">
+      <HintPath>..\runtime\webview2\Microsoft.Web.WebView2.Wpf.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

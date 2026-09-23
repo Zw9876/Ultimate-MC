@@ -1,7 +1,10 @@
 <Window x:Class="MinecraftLauncher.UI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Minecraft Portable Launcher" Height="560" Width="820"
+        Title="Minecraft Portable Launcher"
+        Icon="pack://application:,,,/minecraft.ico"
+        Width="1344" Height="756"
+        MinWidth="1100" MinHeight="700"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource BgBrush}">
 
@@ -22,102 +25,803 @@
             <RadioButton x:Name="NavServer" Content="SERVER" GroupName="nav"
                          Checked="NavServer_Checked"
                          Style="{StaticResource NavStyle}"/>
+            <RadioButton x:Name="NavMods" Content="MODS" GroupName="nav"
+                         Checked="NavMods_Checked"
+                         Style="{StaticResource NavStyle}"/>
+            <RadioButton x:Name="NavSkins" Content="SKINS" GroupName="nav"
+                         Checked="NavSkins_Checked"
+                         Style="{StaticResource NavStyle}"/>
+            <RadioButton x:Name="NavSetup" Content="SETUP" GroupName="nav"
+                         Checked="NavSetup_Checked"
+                         Style="{StaticResource NavStyle}"/>
+
+            <!-- Appears only when a machine on the network is running a newer
+                 launcher. Lives in the sidebar so it is visible from every tab
+                 without disturbing the tab layouts. -->
+            <Border x:Name="UpdateCard" Visibility="Collapsed"
+                    Background="{StaticResource FieldBrush}"
+                    BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"
+                    CornerRadius="6" Margin="12,28,12,0" Padding="10,9,10,10">
+                <StackPanel>
+                    <TextBlock Text="UPDATE AVAILABLE" FontSize="10" FontWeight="Bold"
+                               Foreground="{StaticResource AccentBrush}"/>
+                    <TextBlock x:Name="UpdateDetail" TextWrapping="Wrap" FontSize="11"
+                               Foreground="{StaticResource MutedBrush}" Margin="0,5,0,8"/>
+                    <Button x:Name="UpdateButton" Content="Update" Height="27"
+                            Click="UpdateButton_Click"
+                            Style="{StaticResource PlainButton}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Shown only while this launcher is hosting something, for when everyone
+                 is packing up at once. One press closes Minecraft on every machine
+                 using this skin server after a 5-second countdown, then stops the
+                 Minecraft server and the skin server. It asks first, games close as if
+                 their X was clicked, and the server saves before stopping, so an
+                 accidental press loses nothing. -->
+            <Button x:Name="ShutdownAllButton" Visibility="Collapsed"
+                    Content="SHUT DOWN FOR EVERYONE" Height="34" Margin="12,24,12,0"
+                    FontWeight="Bold" FontSize="11"
+                    Foreground="#FF8A8A" Background="#3A2323"
+                    Click="ShutdownAllButton_Click"
+                    Style="{StaticResource PlainButton}"/>
+
+            <!-- Always visible. Without this there is no way to tell which build a
+                 machine is running, which makes "is the update working?" impossible
+                 to answer from the other side of a room. -->
+            <StackPanel Margin="18,26,12,0">
+                <TextBlock x:Name="VersionLabel" FontSize="11"
+                           Foreground="{StaticResource MutedBrush}"/>
+                <Button x:Name="CheckUpdateButton" Content="Check for updates"
+                        HorizontalAlignment="Left" Margin="0,4,0,0"
+                        Click="CheckUpdateButton_Click"
+                        Style="{StaticResource LinkButton}"/>
+                <TextBlock x:Name="UpdateCheckResult" FontSize="10" TextWrapping="Wrap"
+                           Margin="0,4,0,0" Foreground="{StaticResource MutedBrush}"/>
+            </StackPanel>
         </StackPanel>
 
         <!-- Content -->
         <Grid Grid.Column="1" Margin="28,24,28,24">
 
             <!-- ══ CLIENT TAB ══ -->
-            <StackPanel x:Name="ClientPanel" Visibility="Visible">
-                <TextBlock Text="Play" FontSize="22" FontWeight="Bold" Margin="0,0,0,18"/>
+            <!-- Laid out like the PowerShell launcher: a 160px clear band lets the
+                 wallpaper act as a header, then section labels and cards. -->
+            <StackPanel x:Name="ClientPanel" Visibility="Visible" Margin="0,160,0,0">
 
-                <TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                <ComboBox x:Name="VersionCombo" Height="30" Margin="0,0,0,14"
-                          SelectionChanged="VersionCombo_SelectionChanged"/>
+                    <TextBlock Text="CLIENT" Style="{StaticResource SectionLabel}"/>
 
-                <TextBlock Text="Loader" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                <ComboBox x:Name="LoaderCombo" Height="30" Margin="0,0,0,14"/>
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
 
-                <TextBlock Text="Username" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                <TextBox x:Name="UsernameBox" Height="30" Margin="0,0,0,14"
-                         Background="{StaticResource FieldBrush}" Foreground="{StaticResource TextBrush}"
-                         BorderThickness="0" Padding="8,4" VerticalContentAlignment="Center"/>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="VERSION" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="VersionCombo" Height="30"
+                                          SelectionChanged="VersionCombo_SelectionChanged"/>
+                            </StackPanel>
 
-                <TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4">
-                    <Run Text="Memory: "/>
-                    <Run x:Name="MemLabel" Text="2 GB"/>
-                </TextBlock>
-                <Slider x:Name="MemSlider" Minimum="1" Maximum="16" Value="2"
-                        TickFrequency="1" IsSnapToTickEnabled="True"
-                        SmallChange="1" LargeChange="2"
-                        ValueChanged="MemSlider_ValueChanged" Margin="0,0,0,22"/>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="MOD LOADER" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="LoaderCombo" Height="30"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
 
-                <Button x:Name="PlayButton" Content="PLAY" Height="42" Width="160"
-                        HorizontalAlignment="Left" Click="PlayButton_Click"
-                        Style="{StaticResource AccentButton}"/>
+                    <TextBlock Text="PLAYER" Style="{StaticResource SectionLabel}"/>
 
-                <TextBlock x:Name="ClientStatus" Foreground="{StaticResource MutedBrush}"
-                           Margin="0,16,0,0" TextWrapping="Wrap"/>
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                        <StackPanel>
+                            <TextBlock Text="USERNAME" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="UsernameBox" Height="30"
+                                     Style="{StaticResource FieldBox}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="PERFORMANCE" Style="{StaticResource SectionLabel}"/>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="MEMORY ALLOCATION"
+                                           Style="{StaticResource FieldLabel}" Margin="0"/>
+                                <TextBlock x:Name="MemLabel" Grid.Column="1" Text="2 GB"
+                                           Foreground="{StaticResource AccentBrush}"
+                                           FontSize="11" FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+                            <Slider x:Name="MemSlider" Minimum="1" Maximum="16" Value="2"
+                                    TickFrequency="1" IsSnapToTickEnabled="True"
+                                    SmallChange="1" LargeChange="2"
+                                    ValueChanged="MemSlider_ValueChanged" Margin="0,10,0,2"/>
+
+                            <!-- The client wants far less than the server, and saying so
+                                 matters: turning this up is the usual instinct and it
+                                 makes stutter worse, not better. -->
+                            <TextBlock x:Name="MemAdvice" TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       FontSize="10" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="180"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Button Grid.Column="0" x:Name="PlayButton" Content="PLAY" Height="52"
+                                Click="PlayButton_Click" Style="{StaticResource AccentButton}"/>
+
+                        <Button Grid.Column="2" x:Name="DownloadVersionsButton"
+                                Content="Download Versions" Height="52"
+                                Click="DownloadVersions_Click" Style="{StaticResource PlainButton}"/>
+                    </Grid>
+
+                    <TextBlock x:Name="ClientStatus" Foreground="{StaticResource MutedBrush}"
+                               Margin="0,14,0,0" TextWrapping="Wrap"/>
             </StackPanel>
 
             <!-- ══ SERVER TAB ══ -->
-            <StackPanel x:Name="ServerPanel" Visibility="Collapsed">
-                <TextBlock Text="Host Server" FontSize="22" FontWeight="Bold" Margin="0,0,0,18"/>
+            <StackPanel x:Name="ServerPanel" Visibility="Collapsed" Margin="0,160,0,0">
 
-                <Grid>
+                    <TextBlock Text="SERVER" Style="{StaticResource SectionLabel}"/>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="VERSION" Style="{StaticResource FieldLabel}"/>
+                                <!-- Editable: a machine may have no client installed
+                                     and no server folder yet, and still need to
+                                     host a version by typing it in. -->
+                                <ComboBox x:Name="SvVersionCombo" Height="30"
+                                          IsEditable="True" IsTextSearchEnabled="True"
+                                          SelectionChanged="SvVersionCombo_SelectionChanged"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="SERVER TYPE" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="SvTypeCombo" Height="30"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Text="WORLD SETTINGS" Style="{StaticResource SectionLabel}"/>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="14"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="14"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="14"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="PORT" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="SvPortBox" Text="25565" Height="30"
+                                         Style="{StaticResource FieldBox}"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="GAMEMODE" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="SvGamemodeCombo" Height="30"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="4">
+                                <TextBlock Text="DIFFICULTY" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="SvDifficultyCombo" Height="30"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="6">
+                                <TextBlock Text="MAX PLAYERS" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="SvMaxBox" Text="10" Height="30"
+                                         Style="{StaticResource FieldBox}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- The two settings that decide how much work a tick is. Owned by
+                         the launcher so they apply to every server it starts, existing
+                         ones included, rather than only to newly created folders. -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="14"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Width="120">
+                                <TextBlock Text="VIEW DISTANCE" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="SvViewBox" Text="10" Height="30"
+                                         Style="{StaticResource FieldBox}"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2" Width="120">
+                                <TextBlock Text="SIMULATION" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="SvSimBox" Text="6" Height="30"
+                                         Style="{StaticResource FieldBox}"/>
+                            </StackPanel>
+
+                            <TextBlock Grid.Column="4" VerticalAlignment="Center" TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedBrush}" FontSize="11"
+                                       Text="View distance is how far players can see. Simulation is how far the world actually ticks — mobs, redstone, crops. Lowering simulation is the cheapest way to help a busy server, and players rarely notice it."/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Text="OPTIONS" Style="{StaticResource SectionLabel}"/>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="MEMORY ALLOCATION"
+                                               Style="{StaticResource FieldLabel}" Margin="0"/>
+                                    <TextBlock x:Name="SvMemLabel" Grid.Column="1" Text="2 GB"
+                                               Foreground="{StaticResource AccentBrush}"
+                                               FontSize="11" FontWeight="SemiBold"
+                                               VerticalAlignment="Center"/>
+                                </Grid>
+                                <Slider x:Name="SvMemSlider" Minimum="1" Maximum="16" Value="2"
+                                        TickFrequency="1" IsSnapToTickEnabled="True"
+                                        SmallChange="1" LargeChange="2"
+                                        ValueChanged="SvMemSlider_ValueChanged" Margin="0,10,0,2"/>
+
+                                <!-- What this machine actually has. Every computer is
+                                     different and nobody can check them all, so the
+                                     launcher says so rather than leaving the memory
+                                     default looking arbitrary. -->
+                                <TextBlock x:Name="SvMachineInfo" TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedBrush}"
+                                           FontSize="10" Margin="0,4,0,0"/>
+                            </StackPanel>
+
+                            <CheckBox x:Name="SvPvpCheck" Grid.Column="2" Content="Enable PVP"
+                                      IsChecked="True" Foreground="{StaticResource TextBrush}"
+                                      VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+
+                    <Button x:Name="StartServerButton" Content="START SERVER" Height="52"
+                            Click="StartServerButton_Click" Style="{StaticResource AccentButton}"/>
+
+                    <TextBlock x:Name="ServerStatus" Foreground="{StaticResource MutedBrush}"
+                               Margin="0,14,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <!-- ══ SERVER CONSOLE ══ -->
+            <!-- Takes the place of the Server tab's settings while a server is
+                 running. The server used to live in its own console window that the
+                 launcher could not read; now it is in here. -->
+            <Grid x:Name="ServerConsolePanel" Visibility="Collapsed" Margin="0,160,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="SERVER CONSOLE" Style="{StaticResource SectionLabel}"/>
+
+                <Grid Grid.Row="1" Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" x:Name="ConsoleHeader"
+                               TextWrapping="Wrap" Foreground="{StaticResource TextBrush}"/>
+
+                    <Button Grid.Column="1" x:Name="PlayersToggleButton" Content="PLAYERS"
+                            Width="110" Height="30" VerticalAlignment="Top" Margin="10,0,0,0"
+                            Click="PlayersToggle_Click" Style="{StaticResource PlainButton}"
+                            ToolTip="Who is on the server right now, and how long they have been on"/>
+
+                    <Button Grid.Column="3" x:Name="PregenToggleButton" Content="PRE-GENERATE"
+                            Width="140" Height="30" VerticalAlignment="Top"
+                            Click="PregenToggle_Click" Style="{StaticResource PlainButton}"
+                            ToolTip="Build the world ahead of time, so the server is not generating terrain while people play"/>
+                </Grid>
+
+                <!-- ══ PRE-GENERATION ══ -->
+                <!-- The worlds not being pre-generated is the largest remaining cause
+                     of the host struggling with a crowd. The commands were always
+                     available by hand; this is here because the host has about ninety
+                     minutes and a queue of people waiting, and radius-vs-diameter is
+                     the easiest thing in this area to get wrong. -->
+                <Border Grid.Row="2" x:Name="PregenCard" Style="{StaticResource Card}"
+                        Margin="0,0,0,10" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="PRE-GENERATE WORLD" Style="{StaticResource SectionLabel}"/>
+
+                        <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11"
+                                   TextWrapping="Wrap" Margin="0,0,0,12"
+                                   Text="Builds terrain now so the server is not generating it during ticks later. It keeps running while people play — they simply cannot reach that far. Safe to stop and pick up again."/>
+
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="RADIUS (BLOCKS FROM SPAWN)" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="PregenRadiusBox" Width="120" Height="30"
+                                         Style="{StaticResource FieldBox}" Text="3000"
+                                         TextChanged="PregenRadius_Changed"
+                                         ToolTip="Half-width, not a diameter. 3000 means a 6000 x 6000 world."/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="SHAPE" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="PregenShapeCombo" Width="120" Height="30"
+                                          SelectionChanged="PregenShape_Changed"/>
+                            </StackPanel>
+
+                            <CheckBox Grid.Column="4" x:Name="PregenNetherCheck"
+                                      Content="Nether too (an eighth of the radius)"
+                                      IsChecked="True" Foreground="{StaticResource TextBrush}"
+                                      VerticalAlignment="Bottom" Margin="0,0,0,6"
+                                      Checked="PregenNether_Changed" Unchecked="PregenNether_Changed"
+                                      ToolTip="The Nether is 1:8, so it covers the same ground for a fraction of the work"/>
+                        </Grid>
+
+                        <TextBlock x:Name="PregenEstimate" Foreground="{StaticResource AccentBrush}"
+                                   FontSize="12" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Button Grid.Column="0" x:Name="PregenStartButton" Content="START"
+                                    Width="110" Height="32" Click="PregenStart_Click"
+                                    Style="{StaticResource AccentButton}"/>
+
+                            <Button Grid.Column="2" x:Name="PregenPauseButton" Content="PAUSE"
+                                    Width="110" Height="32" IsEnabled="False"
+                                    Click="PregenPause_Click" Style="{StaticResource PlainButton}"/>
+
+                            <Button Grid.Column="4" x:Name="PregenCancelButton" Content="CANCEL"
+                                    Width="110" Height="32" IsEnabled="False"
+                                    Click="PregenCancel_Click" Style="{StaticResource PlainButton}"/>
+
+                            <Button Grid.Column="6" x:Name="PregenBorderButton"
+                                    Content="SET WORLD BORDER TO MATCH"
+                                    Height="32" Padding="14,0" Click="PregenBorder_Click"
+                                    Style="{StaticResource PlainButton}"
+                                    ToolTip="Keeps players inside the generated area. Shrinking a border takes effect instantly."/>
+                        </Grid>
+
+                        <ProgressBar x:Name="PregenBar" Height="10" Minimum="0" Maximum="100"
+                                     Foreground="{StaticResource AccentBrush}" Background="#2A2A2A"
+                                     BorderThickness="0" Margin="0,0,0,8"/>
+
+                        <TextBlock x:Name="PregenStatus" Foreground="{StaticResource TextBrush}"
+                                   FontSize="12" TextWrapping="Wrap"
+                                   Text="Not running."/>
+                    </StackPanel>
+                </Border>
+
+                <!-- ══ PLAYERS ══ -->
+                <!-- Assembled from the server's own join and leave lines, corrected by
+                     the reply to "list" — the launcher only sees output from when it
+                     attached, so anyone already on is invisible until something asks. -->
+                <Border Grid.Row="3" x:Name="PlayersCard" Style="{StaticResource Card}"
+                        Margin="0,0,0,10" Visibility="Collapsed">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0" x:Name="PlayersSummary"
+                                       Style="{StaticResource SectionLabel}"
+                                       Text="WHO IS ON" VerticalAlignment="Center"/>
+
+                            <Button Grid.Column="1" x:Name="PlayersRefreshButton" Content="REFRESH"
+                                    Width="100" Height="28" Click="PlayersRefresh_Click"
+                                    Style="{StaticResource PlainButton}"
+                                    ToolTip="Asks the server directly, in case anyone joined before this console opened"/>
+                        </Grid>
+
+                        <ListView Grid.Row="1" x:Name="PlayersList" Height="150"
+                                  BorderThickness="0" Background="Transparent">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="Player" Width="240"
+                                                    DisplayMemberBinding="{Binding Name}"/>
+                                    <GridViewColumn Header="On for" Width="140"
+                                                    DisplayMemberBinding="{Binding PlaytimeText}"/>
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="4" Style="{StaticResource Card}" Padding="2" Margin="0,0,0,10">
+                    <TextBox x:Name="ConsoleOutput" IsReadOnly="True" IsReadOnlyCaretVisible="False"
+                             Background="Transparent" BorderThickness="0"
+                             Foreground="{StaticResource TextBrush}"
+                             FontFamily="Consolas, Courier New" FontSize="12"
+                             TextWrapping="NoWrap" AcceptsReturn="True"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Auto"/>
+                </Border>
+
+                <Grid Grid.Row="5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="10"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="10"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBox Grid.Column="0" x:Name="ConsoleInput" Height="32"
+                             Style="{StaticResource FieldBox}"
+                             KeyDown="ConsoleInput_KeyDown"
+                             ToolTip="Type a server command and press Enter, e.g. list, op &lt;name&gt;, say hello"/>
+
+                    <Button Grid.Column="2" x:Name="ConsoleSendButton" Content="Send"
+                            Width="90" Height="32" Click="ConsoleSend_Click"
+                            Style="{StaticResource PlainButton}"/>
+
+                    <Button Grid.Column="4" x:Name="StopServerButton" Content="STOP SERVER"
+                            Width="150" Height="32" Click="StopServerButton_Click"
+                            Style="{StaticResource PlainButton}"/>
+                </Grid>
+            </Grid>
+
+            <!-- ══ MODS TAB ══ -->
+            <Grid x:Name="ModsPanel" Visibility="Collapsed" Margin="0,160,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="Mods" Style="{StaticResource TabTitle}" Margin="0,0,0,16"/>
+
+                <!-- Target selection -->
+                <Grid Grid.Row="1" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="12"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                        <ComboBox x:Name="SvVersionCombo" Height="30" Margin="0,0,0,14"
-                                  SelectionChanged="SvVersionCombo_SelectionChanged"/>
-
-                        <TextBlock Text="Server Type" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                        <ComboBox x:Name="SvTypeCombo" Height="30" Margin="0,0,0,14"/>
-
-                        <TextBlock Text="Port" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                        <TextBox x:Name="SvPortBox" Text="25565" Height="30" Margin="0,0,0,14"
-                                 Background="{StaticResource FieldBrush}" Foreground="{StaticResource TextBrush}"
-                                 BorderThickness="0" Padding="8,4" VerticalContentAlignment="Center"/>
-
-                        <TextBlock Text="Max Players" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                        <TextBox x:Name="SvMaxBox" Text="10" Height="30" Margin="0,0,0,4"
-                                 Background="{StaticResource FieldBrush}" Foreground="{StaticResource TextBrush}"
-                                 BorderThickness="0" Padding="8,4" VerticalContentAlignment="Center"/>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Bottom">
+                        <RadioButton x:Name="ModClientRadio" Content="Client" GroupName="modTarget"
+                                     IsChecked="True" Foreground="{StaticResource TextBrush}"
+                                     Checked="ModTarget_Changed" Margin="0,0,14,6"/>
+                        <RadioButton x:Name="ModServerRadio" Content="Server" GroupName="modTarget"
+                                     Foreground="{StaticResource TextBrush}"
+                                     Checked="ModTarget_Changed" Margin="0,0,0,6"/>
                     </StackPanel>
 
                     <StackPanel Grid.Column="2">
-                        <TextBlock Text="Gamemode" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                        <ComboBox x:Name="SvGamemodeCombo" Height="30" Margin="0,0,0,14"/>
+                        <TextBlock Text="Version" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="ModVersionCombo" Height="30"
+                                  SelectionChanged="ModSelector_Changed"/>
+                    </StackPanel>
 
-                        <TextBlock Text="Difficulty" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
-                        <ComboBox x:Name="SvDifficultyCombo" Height="30" Margin="0,0,0,14"/>
-
-                        <TextBlock Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4">
-                            <Run Text="Memory: "/>
-                            <Run x:Name="SvMemLabel" Text="2 GB"/>
-                        </TextBlock>
-                        <Slider x:Name="SvMemSlider" Minimum="1" Maximum="16" Value="2"
-                                TickFrequency="1" IsSnapToTickEnabled="True"
-                                SmallChange="1" LargeChange="2"
-                                ValueChanged="SvMemSlider_ValueChanged" Margin="0,0,0,14"/>
-
-                        <CheckBox x:Name="SvPvpCheck" Content="Enable PVP" IsChecked="True"
-                                  Foreground="{StaticResource TextBrush}" Margin="0,6,0,0"/>
+                    <StackPanel Grid.Column="4">
+                        <TextBlock x:Name="ModLoaderLabel" Text="Server Type"
+                                   Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="ModLoaderCombo" Height="30"
+                                  SelectionChanged="ModSelector_Changed"/>
                     </StackPanel>
                 </Grid>
 
-                <Button x:Name="StartServerButton" Content="START SERVER" Height="42" Width="200"
-                        HorizontalAlignment="Left" Margin="0,20,0,0"
-                        Click="StartServerButton_Click" Style="{StaticResource AccentButton}"/>
+                <StackPanel Grid.Row="2">
+                    <TextBlock x:Name="ModFolderLabel" Margin="0,0,0,8"
+                               Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
 
-                <TextBlock x:Name="ServerStatus" Foreground="{StaticResource MutedBrush}"
-                           Margin="0,16,0,0" TextWrapping="Wrap"/>
-            </StackPanel>
+                    <!-- versions/<version>/mods is per-version, not per-loader, so Fabric
+                         and NeoForge on the same Minecraft version share it. Handing a
+                         loader the other one's jars crashes it at startup with a stack
+                         trace that never mentions the real cause. -->
+                    <Border x:Name="ModMismatchCard" Style="{StaticResource Card}"
+                            Margin="0,0,0,8" Visibility="Collapsed"
+                            BorderBrush="#C8734A" BorderThickness="1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0" x:Name="ModMismatchText"
+                                       Foreground="{StaticResource TextBrush}"
+                                       TextWrapping="Wrap" VerticalAlignment="Center"/>
+
+                            <Button Grid.Column="2" x:Name="ModFixButton"
+                                    Content="TURN THOSE OFF" Height="32" Padding="14,0"
+                                    VerticalAlignment="Center" Click="ModFix_Click"
+                                    Style="{StaticResource PlainButton}"
+                                    ToolTip="Renames them to .disabled — nothing is deleted, and switching back turns them on again"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <ListView Grid.Row="3" x:Name="ModsList" SelectionMode="Extended">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="State" Width="60"
+                                            DisplayMemberBinding="{Binding StateText}"/>
+                            <GridViewColumn Header="File" Width="340"
+                                            DisplayMemberBinding="{Binding DisplayName}"/>
+                            <GridViewColumn Header="Built for" Width="130"
+                                            DisplayMemberBinding="{Binding LoaderText}"/>
+                            <GridViewColumn Header="Size" Width="100"
+                                            DisplayMemberBinding="{Binding SizeText}"/>
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+
+                <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,12,0,0">
+                    <Button x:Name="ModGetOnlineButton" Content="Get mods online…"
+                            Width="140" Height="32" Margin="0,0,8,0"
+                            Click="ModGetOnline_Click" Style="{StaticResource PlainButton}"
+                            ToolTip="Search Modrinth for mods that fit this version and loader, and install them straight into this folder"/>
+                    <Button x:Name="ModLoaderUpdateButton" Content="Update loader…"
+                            Width="130" Height="32" Margin="0,0,8,0"
+                            Click="ModLoaderUpdate_Click" Style="{StaticResource PlainButton}"
+                            ToolTip="Update the Fabric loader for this version without reinstalling Minecraft — from the internet, or from a pack carried in"/>
+                    <Button Content="Add…" Width="90" Height="32" Margin="0,0,8,0"
+                            Click="ModAdd_Click" Style="{StaticResource PlainButton}"/>
+                    <Button Content="Enable / Disable" Width="130" Height="32" Margin="0,0,8,0"
+                            Click="ModToggle_Click" Style="{StaticResource PlainButton}"/>
+                    <Button Content="Remove" Width="90" Height="32" Margin="0,0,8,0"
+                            Click="ModRemove_Click" Style="{StaticResource PlainButton}"/>
+                    <Button Content="Open Folder" Width="110" Height="32" Margin="0,0,8,0"
+                            Click="ModOpenFolder_Click" Style="{StaticResource PlainButton}"/>
+                    <TextBlock x:Name="ModStatus" Foreground="{StaticResource MutedBrush}"
+                               VerticalAlignment="Center" Margin="8,0,0,0"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- ══ SKINS TAB ══ -->
+            <Grid x:Name="SkinsPanel" Visibility="Collapsed" Margin="0,160,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="Skins" Style="{StaticResource TabTitle}" Margin="0,0,0,14"/>
+
+                <!-- Skin server status -->
+                <Border Grid.Row="1" Background="{StaticResource FieldBrush}" CornerRadius="6"
+                        Padding="12,10" Margin="0,0,0,14">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <TextBlock x:Name="SkinServerStatus" Text="Skin server: stopped"
+                                       FontWeight="SemiBold" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="SkinServerDetail" Foreground="{StaticResource MutedBrush}"
+                                       FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap"
+                                       Text="Starts automatically when you host a server. Players on the LAN find it by themselves."/>
+                        </StackPanel>
+
+                        <Button Grid.Column="1" x:Name="SkinServerToggle" Content="Start"
+                                Width="90" Height="30" VerticalAlignment="Center"
+                                Click="SkinServerToggle_Click" Style="{StaticResource PlainButton}"/>
+                    </Grid>
+                </Border>
+
+                <!-- List + preview -->
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="300"/>
+                    </Grid.ColumnDefinitions>
+
+                    <ListView Grid.Column="0" x:Name="SkinsList" SelectionMode="Single"
+                              SelectionChanged="SkinsList_SelectionChanged">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Username" Width="180"
+                                                DisplayMemberBinding="{Binding Username}"/>
+                                <GridViewColumn Header="Model" Width="130"
+                                                DisplayMemberBinding="{Binding ModelLabel}"/>
+                                <GridViewColumn Header="File" Width="160"
+                                                DisplayMemberBinding="{Binding FileName}"/>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+
+                    <Border Grid.Column="2" Background="#101010" CornerRadius="6">
+                        <Grid>
+                            <TextBlock x:Name="SkinPreviewPlaceholder"
+                                       Text="Select a skin&#x0a;to preview"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       TextAlignment="Center" TextWrapping="Wrap"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Margin="12"/>
+                            <ContentControl x:Name="SkinViewerHost" Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!-- Actions -->
+                <Grid Grid.Row="3" Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="300"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                        <Button Content="Add…" Width="80" Height="32" Margin="0,0,8,0"
+                                Click="SkinAdd_Click" Style="{StaticResource PlainButton}"/>
+                        <Button Content="Toggle Model" Width="110" Height="32" Margin="0,0,8,0"
+                                Click="SkinToggleModel_Click" Style="{StaticResource PlainButton}"/>
+                        <Button Content="Remove" Width="85" Height="32" Margin="0,0,8,0"
+                                Click="SkinRemove_Click" Style="{StaticResource PlainButton}"/>
+                        <Button Content="Open Folder" Width="105" Height="32"
+                                Click="SkinOpenFolder_Click" Style="{StaticResource PlainButton}"/>
+                    </StackPanel>
+
+                    <Button Grid.Column="2" x:Name="SkinBrowserButton" Content="Open in Browser"
+                            Height="32" IsEnabled="False" Click="SkinOpenInBrowser_Click"
+                            Style="{StaticResource PlainButton}"/>
+                </Grid>
+            </Grid>
+
+            <!-- ══ SETUP TAB ══ -->
+            <Grid x:Name="SetupPanel" Visibility="Collapsed" Margin="0,160,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="140"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="Install Versions" Style="{StaticResource TabTitle}"
+                           Margin="0,0,0,16"/>
+
+                <!-- Filters -->
+                <Grid Grid.Row="1" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="160"/>
+                        <ColumnDefinition Width="10"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="10"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <ComboBox Grid.Column="0" x:Name="SetupTypeCombo" Height="30"
+                              SelectionChanged="SetupFilter_Changed"/>
+                    <TextBox Grid.Column="2" x:Name="SetupSearchBox" Height="30"
+                             Style="{StaticResource FieldBox}"
+                             TextChanged="SetupSearch_Changed"/>
+                    <Button Grid.Column="4" x:Name="SetupRefreshButton" Content="Refresh List"
+                            Width="110" Height="30" Click="SetupRefresh_Click"
+                            Style="{StaticResource PlainButton}"/>
+                </Grid>
+
+                <ListView Grid.Row="2" x:Name="SetupList" SelectionMode="Single"
+                          SelectionChanged="SetupList_SelectionChanged">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="Version" Width="200"
+                                            DisplayMemberBinding="{Binding Id}"/>
+                            <GridViewColumn Header="Type" Width="120"
+                                            DisplayMemberBinding="{Binding Type}"/>
+                            <GridViewColumn Header="Released" Width="140"
+                                            DisplayMemberBinding="{Binding ReleaseDate}"/>
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+
+                <!-- Fabric option -->
+                <Grid Grid.Row="3" Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="Mod loader" Foreground="{StaticResource MutedBrush}"
+                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <ComboBox x:Name="SetupLoaderCombo" Width="120" Height="28"
+                                  SelectionChanged="SetupLoader_Changed"/>
+                    </StackPanel>
+                    <ComboBox Grid.Column="2" x:Name="SetupLoaderBuildCombo" Height="28" IsEnabled="False"/>
+                </Grid>
+
+                <!-- Actions -->
+                <Grid Grid.Row="4" Margin="0,12,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Button Grid.Column="0" x:Name="SetupInstallButton" Content="INSTALL"
+                            Width="140" Height="36" Click="SetupInstall_Click"
+                            Style="{StaticResource AccentButton}"/>
+                    <Button Grid.Column="2" x:Name="SetupCancelButton" Content="Cancel"
+                            Width="90" Height="36" IsEnabled="False" Click="SetupCancel_Click"
+                            Style="{StaticResource PlainButton}"/>
+                    <ProgressBar Grid.Column="4" x:Name="SetupProgress" Height="10"
+                                 VerticalAlignment="Center" Minimum="0" Maximum="100"
+                                 Foreground="{StaticResource AccentBrush}" Background="#2A2A2A"
+                                 BorderThickness="0"/>
+                </Grid>
+
+                <TextBox Grid.Row="5" x:Name="SetupLog" IsReadOnly="True"
+                         Background="#101010" Foreground="{StaticResource MutedBrush}"
+                         BorderThickness="0" FontFamily="Consolas" FontSize="11"
+                         VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+            </Grid>
         </Grid>
     </Grid>
 </Window>

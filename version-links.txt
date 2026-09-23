@@ -1,0 +1,17 @@
+# Minecraft Portable Launcher — version download links
+#
+# One entry per line, in either form:
+#     Name | https://example.com/downloads/1.21.1.zip
+#     Name = https://example.com/downloads/1.21.1.zip
+#
+# A bare URL on its own line also works; the name is taken from it.
+# Lines starting with # are ignored.
+#
+# Clicking an entry opens the link in your browser. Download the file,
+# then extract it into the launcher's versions\ folder so that you get:
+#     versions\<version>\versions\<version>.json
+#
+# Only http:// and https:// links are shown. Anything else is ignored.
+#
+# Add your links below.
+Minecraft Versions = https://drive.google.com/drive/folders/1bRBl_6uEdm4xoiOrXWZabeGblMXI1etz
