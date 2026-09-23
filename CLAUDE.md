@@ -138,7 +138,7 @@ session that proved the other two did not isolate it. Skins working for everyone
 is consistent with it, but is not the same observation: it also holds if nobody
 had a stray local server to be misled by.
 
-**Current build: 1.2.265.81** — 2026-09-22, carrying pre-generation, the mod loader
+**Current build: 1.2.265.140** — 2026-09-22, carrying pre-generation, the mod loader
 checks (family *and* version), the player list, Modrinth mod downloading and Fabric
 loader updating. At the repo root and in
 the rollout zip kept outside the repo (56.2 MB, verified byte-for-byte). Host

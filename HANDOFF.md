@@ -582,7 +582,7 @@ committed here is world-readable the moment it is pushed.
 
 The port is complete and shipping. Rollout is no longer a problem: the machines
 run 1.2.x, they detect updates over the LAN, and only the host needs a new build
-by hand. Current build at the repo root and in the rollout zip: **1.2.265.81**
+by hand. Current build at the repo root and in the rollout zip: **1.2.265.140**
 (the zip is kept outside the repo — see section 8).
 
 **Cleared 2026-09-22.** The user ran both on the real machines and reported them
