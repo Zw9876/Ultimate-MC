@@ -634,11 +634,11 @@ committed here is world-readable the moment it is pushed.
 ## 10. Next tasks
 
 The port is complete and shipping. Current build at the repo root and in the rollout
-zip: **1.2.265.376** (the zip is kept outside the repo — see section 8).
+zip: **1.2.265.1389** (the zip is kept outside the repo — see section 8).
 
 **This build has to reach the host by hand once, and it is the last one that does.**
 Updates became mandatory and self-installing in it (section 5), so once the host is on
-1.2.265.376 every other machine installs it on its own within a couple of minutes of
+1.2.265.1389 every other machine installs it on its own within a couple of minutes of
 the host starting their server. Until the host has it, nothing else changes.
 
 **Cleared 2026-09-22.** The user ran both on the real machines and reported them
@@ -652,7 +652,7 @@ once before the host can close it for them.
 
 What is genuinely outstanding:
 
-0. **Put 1.2.265.376 on the host.** Everything below matters less than this: it is
+0. **Put 1.2.265.1389 on the host.** Everything below matters less than this: it is
    what turns rollout from a chore into something that happens by itself.
 
 1. **Run the network diagnostic on a machine where Minecraft cannot reach the
@@ -1116,7 +1116,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **340 checks, about 4.5 seconds.**
+`MinecraftLauncher.Tests/` — **391 checks, about 11 seconds** — 320 of them with no internet.
 
 ```powershell
 tools\run-tests.ps1                 # everything

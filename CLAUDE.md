@@ -11,7 +11,7 @@ The C# launcher (`MinecraftLauncher/`, .NET 10 WPF) is **complete and shipping**
 The whole PowerShell feature set is ported plus a good deal more;
 `MinecraftLauncher-Standalone.ps1` is now only a behavioural reference.
 
-**Current build: 1.2.265.376** (2026-09-23), at the repo root and in the rollout
+**Current build: 1.2.265.1389** (2026-09-23), at the repo root and in the rollout
 zip kept outside the repo (56.2 MB, verified byte-for-byte). Updates are mandatory
 from here on, so **this is the last build anyone copies by hand**: put it on the
 host and every other machine installs it itself.
@@ -34,6 +34,7 @@ Two things are worth carrying in your head because they shape decisions:
   consistent with it but is not the same observation.
 
 Outstanding work is HANDOFF.md section 10.
+
 ## Where to look in HANDOFF.md
 
 | Question | Section |
@@ -94,8 +95,8 @@ beside the exe and finds nothing.
   compiled fine and failed at run time — a wrong Java version, a silently
   misdirected installer, a profile the scanner could not see. Launch it, drive the
   UI, read the server output.
-- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 340 checks, about
-  4.5 seconds, exit code 0 when clean. `-Offline` skips the network suite. Piped
+- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 391 checks, about 11
+  seconds, exit code 0 when clean (320 of them need no internet). `-Offline` skips the network suite. Piped
   anywhere it prints only failures and the count — `-ShowAll` for a line per check.
   Add to `MinecraftLauncher.Tests/Suites/` as work lands — and write the checks against
   **captured real output**, not an invented format; every parser in this project that
