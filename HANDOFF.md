@@ -1441,12 +1441,30 @@ that stops flagging **that hash**.
 
 ### Before assuming any of this
 
-Get the detection name off the affected machine — it decides which fix applies:
+Get the detection name off the affected machine — it decides which fix applies.
+`tools\Get-DefenderDetection.ps1` prints the lot: Defender's state, the named
+threats, and the recent detections with their resource strings. It is **read-only**,
+so unlike a script that sets an exclusion it does not trip the behaviour classifier.
+
+Copy that one file to the machine and run it, or paste the two lines it is built on:
 
 ```powershell
 Get-MpThreat | Select-Object ThreatName, IsActive, @{n='File';e={$_.Resources -join '; '}}
 Get-MpThreatDetection | Sort-Object InitialDetectionTime -Descending | Select-Object -First 5
 ```
+
+Read the **resource prefix** as well as the name — they answer different questions:
+
+| Prefix | What was scanned |
+|---|---|
+| `file:_` / `containerfile:_` | a file on disk, the ordinary case |
+| `webfile:_` | caught as it downloaded |
+| `CmdLine:_` | a command line, not a file at all |
+
+**If a download was blocked but Protection history is empty, it was SmartScreen in
+the browser, not Defender.** Nothing will be listed, no exclusion will help, and the
+fix is in the browser's own downloads list. Worth ruling out first, because it looks
+identical from the outside.
 
 A name ending `!ml` is the heuristic case above. A `Behavior:Win32/...` name is
 behaviour monitoring or an ASR rule catching the swap at run time, which an
