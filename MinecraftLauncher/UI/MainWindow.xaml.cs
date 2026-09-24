@@ -1712,6 +1712,46 @@ namespace MinecraftLauncher.UI
             RefreshMods();
         }
 
+        private void ModPurgeDisabled_Click(object sender, RoutedEventArgs e)
+        {
+            if (_modsFolder.Length == 0) return;
+
+            var disabled = ModManager.DisabledIn(_modsFolder);
+            string noun = ModManager.Noun(ModServerRadio.IsChecked == true, ModLoaderType).ToLowerInvariant();
+
+            if (disabled.Count == 0)
+            {
+                ModStatus.Text = $"There are no turned-off {noun}s here to clear out.";
+                return;
+            }
+
+            // Named, not counted. This is the one button here that removes something,
+            // and seeing the list is what catches "that one is off on purpose".
+            const int show = 15;
+            string names = string.Join(Environment.NewLine,
+                disabled.Take(show).Select(m => "    " + m.DisplayName));
+
+            if (disabled.Count > show)
+                names += $"{Environment.NewLine}    ...and {disabled.Count - show} more";
+
+            var answer = MessageBox.Show(
+                $"Delete {disabled.Count} turned-off {noun}(s)?{Environment.NewLine}{Environment.NewLine}" +
+                names + Environment.NewLine + Environment.NewLine +
+                "They go to the Recycle Bin, so this can be undone." + Environment.NewLine +
+                $"Nothing that is switched on is touched.",
+                $"Delete disabled {noun}s", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+
+            if (answer != MessageBoxResult.Yes) return;
+
+            var result = ModManager.RemoveDisabled(_modsFolder);
+            RefreshMods();
+
+            ModStatus.Text = result.Failed.Count == 0
+                ? $"Deleted {result.Removed.Count} turned-off {noun}(s) — they are in the Recycle Bin."
+                : $"Deleted {result.Removed.Count}; {result.Failed.Count} could not be removed " +
+                  "(the game may still be open).";
+        }
+
         private void ModOpenFolder_Click(object sender, RoutedEventArgs e)
         {
             if (_modsFolder.Length == 0) return;

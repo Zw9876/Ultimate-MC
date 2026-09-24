@@ -651,6 +651,10 @@
                             Click="ModToggle_Click" Style="{StaticResource PlainButton}"/>
                     <Button Content="Remove" Width="90" Height="32" Margin="0,0,8,0"
                             Click="ModRemove_Click" Style="{StaticResource PlainButton}"/>
+                    <Button x:Name="ModPurgeDisabledButton" Content="Delete disabled"
+                            Width="130" Height="32" Margin="0,0,8,0"
+                            Click="ModPurgeDisabled_Click" Style="{StaticResource PlainButton}"
+                            ToolTip="Clears out every turned-off jar in this folder. They go to the Recycle Bin, not for good."/>
                     <Button Content="Open Folder" Width="110" Height="32" Margin="0,0,8,0"
                             Click="ModOpenFolder_Click" Style="{StaticResource PlainButton}"/>
                     <TextBlock x:Name="ModStatus" Foreground="{StaticResource MutedBrush}"

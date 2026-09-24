@@ -129,9 +129,94 @@ namespace MinecraftLauncher.Core
         {
             string path = Path.Combine(folder, fileName);
             if (!File.Exists(path)) return false;
-            File.Delete(path);
+
+            Recycle(path);
             return true;
         }
+
+        /// <summary>What clearing out the disabled jars did.</summary>
+        public sealed class CleanupResult
+        {
+            public List<string> Removed { get; } = new();
+            public List<string> Failed { get; } = new();
+        }
+
+        /// <summary>The disabled jars in a folder, which is what <see cref="RemoveDisabled"/> acts on.</summary>
+        public static List<ModEntry> DisabledIn(string folder) =>
+            List(folder).Where(m => !m.Enabled).ToList();
+
+        /// <summary>
+        /// Clears out every turned-off jar in a folder.
+        /// </summary>
+        /// <remarks>
+        /// A folder that has been switched between loaders a few times fills up with
+        /// <c>.jar.disabled</c> files, and the list stops being readable — which is the
+        /// whole reason this exists.
+        ///
+        /// It removes **only** files that <see cref="IsDisabled"/> accepts, re-checked
+        /// here rather than trusting the caller's list, because the one unacceptable
+        /// outcome is deleting a mod somebody is actually running.
+        /// </remarks>
+        public static CleanupResult RemoveDisabled(string folder)
+        {
+            var result = new CleanupResult();
+            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return result;
+
+            foreach (var mod in DisabledIn(folder))
+            {
+                // The name decides, not the entry: a list built a moment ago could name
+                // a file that has since been turned back on.
+                if (!IsDisabled(mod.FileName)) continue;
+
+                string path = Path.Combine(folder, mod.FileName);
+                if (!File.Exists(path)) continue;
+
+                try
+                {
+                    Recycle(path);
+                    result.Removed.Add(mod.DisplayName);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Usually the game is open and holding the jar. Report it rather
+                    // than abandoning the rest of the folder.
+                    result.Failed.Add(mod.DisplayName);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Deletes to the Recycle Bin rather than for good.
+        /// </summary>
+        /// <remarks>
+        /// Everything else in this launcher turns mods off by renaming them, precisely
+        /// so nothing a person put in the folder is destroyed by a click. Deleting is a
+        /// deliberate exception, so it is worth the one that can be undone — a mod that
+        /// cannot be downloaded again on these machines is not replaceable.
+        ///
+        /// <c>Microsoft.VisualBasic.FileIO</c> ships in the shared framework, so this
+        /// costs no package and nothing to restore offline; it was checked against both
+        /// this project and the test project, which compiles <c>Core/</c> without WPF.
+        /// </remarks>
+        private static void Recycle(string path) => DeleteFile(path);
+
+        /// <summary>How a file is actually removed. Recycled, except under test.</summary>
+        /// <remarks>
+        /// A seam, not a setting: the suites run before and after every change to
+        /// <c>Core/</c>, and a test that really recycled its fixtures would drop a
+        /// handful of junk files into the user's Recycle Bin every single run. Tests
+        /// point this at a plain delete and put it back afterwards. Nothing shipped
+        /// changes it.
+        /// </remarks>
+        internal static Action<string> DeleteFile { get; set; } = RecycleForReal;
+
+        private static void RecycleForReal(string path) =>
+            Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
+                path,
+                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
 
         public static bool SetEnabled(string folder, string fileName, bool enabled)
         {

@@ -281,6 +281,25 @@ including where WebView2 is loaded from — depends on it.
     NeoForge rather than guessed at, because NeoForge used that file up to 1.20.1.
   - A jar declaring nothing is left alone — plenty of legitimate library jars carry
     no descriptor, and disabling those would break working setups.
+- **"Delete disabled" on the Mods tab** — clears out every `.jar.disabled` in the
+  folder. Switching a version between loaders a few times fills it with turned-off
+  jars until the list stops being readable, which is the whole reason it exists.
+  `ModManager.RemoveDisabled`.
+  - **They go to the Recycle Bin, not for good.** Everything else here turns mods off
+    by renaming, precisely so nothing a person put in the folder is destroyed by a
+    click; deleting is a deliberate exception, so it is the kind that can be undone. A
+    mod that cannot be re-downloaded on these machines is not replaceable.
+    `Microsoft.VisualBasic.FileIO` ships in the shared framework — no package, and it
+    was checked against the test project too, which compiles `Core/` without WPF.
+  - The confirmation **names the files**, and shows them without the `.disabled`
+    suffix. This is the only button on the tab that removes anything, and seeing the
+    list is what catches "that one is off on purpose".
+  - It re-checks `IsDisabled` per file rather than trusting the list it was handed,
+    because the one unacceptable outcome is deleting a mod somebody is running.
+  - `ModManager.DeleteFile` is an internal seam pointed at a plain delete by the
+    tests. Recycling the fixtures for real would drop junk in the user's Recycle Bin
+    on every run, and the suites run before and after every `Core/` change.
+
 - **Crash report viewer** — "Crash reports…" on the Client tab, with a line beside it
   saying how many there are and when the last one was (and nothing at all when there
   are none — a permanent mention of crashes on the tab people press PLAY on would read
@@ -1175,7 +1194,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **435 checks, about 9 seconds** — 354 of them with no internet.
+`MinecraftLauncher.Tests/` — **452 checks, about 11 seconds** — 371 of them with no internet.
 
 ```powershell
 tools\run-tests.ps1                 # everything
@@ -1210,6 +1229,16 @@ sessions before being kept:
 | `Verify-Publish.ps1` | **Run after every publish.** Starts the root launcher, turns its skin server on, and checks the manifest endpoint serves the expected version, all 6 files, gzip, and its own exe back byte-for-byte. Catches the one silent failure: a framework-dependent build at the root answers `/launcher/manifest` with 404 and nobody finds out until rollout day. |
 | `Verify-AutoUpdate.ps1` | The whole mandatory-update path, unattended: a newer host serving, an older client nobody touches, and the client swapping itself byte-for-byte and relaunching. Needs a Debug build **and** a Release publish made at least a minute later, so the host is the newer one. |
 | `Diagnose-MinecraftNet.ps1` | Why Minecraft cannot reach the internet on a machine — see section 10. |
+
+**UI Automation cannot see a `MessageBox`.** Driving a button whose handler shows one
+looks exactly like a handler that never ran: `InvokePattern.Invoke` returns straight
+away (it does not wait for the action), the status line still reads whatever it said
+before, and enumerating top-level windows finds nothing new. Hours went into chasing a
+"stale build" that did not exist. Answer the dialog with a keystroke instead —
+`AppActivate` the process then `SendKeys` `{ENTER}` for the default button or `{ESC}`
+to cancel — and assert on what changed on disk. `drive-purge2` in the session
+scratchpad is the shape that works; the Esc case is worth keeping, because "saying no
+deletes nothing" is the check that matters.
 
 Things worth knowing before changing it:
 
