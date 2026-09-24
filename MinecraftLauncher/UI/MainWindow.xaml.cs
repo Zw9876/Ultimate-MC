@@ -440,6 +440,53 @@ namespace MinecraftLauncher.UI
                 int idx = loaders.IndexOf(_config.LastLoader);
                 LoaderCombo.SelectedIndex = idx >= 0 ? idx : 0;
             }
+
+            ShowCrashHint(version);
+        }
+
+        /// <summary>
+        /// Says whether this version has crashed, beside the button that explains it.
+        /// </summary>
+        /// <remarks>
+        /// The reports have always been written; the problem was that nobody knew they
+        /// existed. Saying nothing when there are none is the point — a permanent
+        /// mention of crashes on a tab people open to press PLAY would read as a
+        /// warning about the version they just chose.
+        /// </remarks>
+        private void ShowCrashHint(string version)
+        {
+            if (CrashHintLabel is null) return;
+
+            try
+            {
+                var reports = CrashReports.List(version);
+
+                CrashHintLabel.Text = reports.Count == 0
+                    ? ""
+                    : reports.Count == 1
+                        ? $"1 crash report — most recently {reports[0].WhenText}."
+                        : $"{reports.Count} crash reports — most recently {reports[0].WhenText}.";
+            }
+            catch (Exception)
+            {
+                // A hint is not worth failing a tab over.
+                CrashHintLabel.Text = "";
+            }
+        }
+
+        private void CrashReports_Click(object sender, RoutedEventArgs e)
+        {
+            if (VersionCombo.SelectedItem is not string version)
+            {
+                MessageBox.Show("Pick a version first.", "Crash reports",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            new CrashReportWindow(version) { Owner = this }.ShowDialog();
+
+            // A report may have been deleted from the folder while the window was open.
+            ShowCrashHint(version);
         }
 
         private void MemSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -702,8 +749,18 @@ namespace MinecraftLauncher.UI
             _behind.Reset();
             _roster.Clear();
             RefreshPlayersList();
-            PlayersCard.Visibility = Visibility.Collapsed;
-            PlayersToggleButton.Content = "PLAYERS";
+
+            // Open, not collapsed. Who is on is the thing a host looks at most, and
+            // behind a toggle it was easy to forget the panel existed at all. The
+            // header carries the count either way; this is the list and the playtimes.
+            PlayersCard.Visibility = Visibility.Visible;
+            PlayersToggleButton.Content = "HIDE";
+
+            // Deliberately not asking the server who is on here. This runs as the
+            // server is starting, so there is nobody to report yet and the command
+            // would go to a process that cannot answer it. An empty roster is the
+            // true answer for a server that has only just been launched; REFRESH is
+            // there for the case where that is ever in doubt.
             SetPregenRunning(false);
             PregenCard.Visibility = Visibility.Collapsed;
             PregenToggleButton.Content = "PRE-GENERATE";

@@ -79,6 +79,7 @@
 
             <TextBox Grid.Column="0" x:Name="SearchBox" Height="34"
                      Style="{StaticResource FieldBox}" KeyDown="SearchBox_KeyDown"
+                     TextChanged="SearchBox_TextChanged"
                      ToolTip="Leave empty to browse everything that fits this version and loader"/>
 
             <TextBlock Grid.Column="2" Text="Sort by" VerticalAlignment="Center"

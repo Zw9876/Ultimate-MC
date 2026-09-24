@@ -281,6 +281,40 @@ including where WebView2 is loaded from — depends on it.
     NeoForge rather than guessed at, because NeoForge used that file up to 1.20.1.
   - A jar declaring nothing is left alone — plenty of legitimate library jars carry
     no descriptor, and disabling those would break working setups.
+- **Crash report viewer** — "Crash reports…" on the Client tab, with a line beside it
+  saying how many there are and when the last one was (and nothing at all when there
+  are none — a permanent mention of crashes on the tab people press PLAY on would read
+  as a warning about the version they just picked). The window lists them newest first
+  and, for the selected one, says in plain English what the game was doing, what the
+  error was, **which mod broke and why**, with the whole report underneath and a button
+  to copy it. `Core/CrashReports.cs`, `UI/CrashReportWindow.xaml`.
+  - Client crash reports live in `versions/<v>/crash-reports` because `--gameDir` is
+    the version folder.
+  - Parsed from a **real captured report**, not the remembered format: `-- MOD <id> --`
+    sections, `Suspected Mods:`, and the `Failure message:` continuation line — which
+    is the half that says what to do ("*Currently, supermartijn642configlib is not
+    installed*").
+  - **Naming the culprit is a Forge and NeoForge feature.** Fabric reports carry the
+    description and the exception but blame nobody, so for those it says "No mod is
+    named in this report" rather than guessing from the stack trace. A wrong accusation
+    costs someone an evening removing a mod that was never the problem.
+  - Read-only. Deleting a crash report is a decision made in the folder, which is one
+    button away, not something a viewer offers to do.
+
+- **The mod browser searches as you type** — 400 ms after the last keystroke, rather
+  than on Enter (which still works, and now means "don't wait"). Two things had to
+  change with it: the search box no longer disables itself while searching, which would
+  take focus away mid-word and drop keystrokes; and a search that has been superseded
+  no longer writes to the status line or clears the busy state, which previously let a
+  cancelled search report "cancelled" over the top of the newer one and re-enable the
+  window while it was still working. That race existed before; typing made it constant.
+
+- **The PLAYERS panel opens with the server** rather than starting collapsed. The
+  header has always carried the count; this is the list and the playtimes. It
+  deliberately does not ask the server who is on at that moment — the console attaches
+  while the server is still starting, so there is nobody to report and the command
+  would go to a process that cannot answer. REFRESH covers the doubt.
+
 - **Mod update checking** — "Check for updates" on the Mods tab asks Modrinth whether
   anything installed has a newer build for the selected version and loader, and fills
   in an **Update** column (`0.5.12 → 0.6.0`, `up to date`, `not on Modrinth`). Offers
@@ -1141,7 +1175,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **391 checks, about 11 seconds** — 320 of them with no internet.
+`MinecraftLauncher.Tests/` — **435 checks, about 9 seconds** — 354 of them with no internet.
 
 ```powershell
 tools\run-tests.ps1                 # everything

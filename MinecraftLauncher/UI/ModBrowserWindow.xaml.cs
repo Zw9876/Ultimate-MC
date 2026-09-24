@@ -10,6 +10,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using MinecraftLauncher.Core;
 
 namespace MinecraftLauncher.UI
@@ -68,8 +69,33 @@ namespace MinecraftLauncher.UI
 
             VersionCombo.SelectionChanged += (_, _) => ShowVersionNote();
 
+            // Search runs when typing stops, rather than on Enter. Long enough that a
+            // normal typing rhythm does not fire a request per keystroke, short enough
+            // that it feels like it is keeping up. Every keystroke restarts it, so only
+            // the pause at the end costs a request.
+            _typing = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+            _typing.Tick += async (_, _) =>
+            {
+                _typing.Stop();
+                await RunSearch(reset: true);
+            };
+
             Loaded += async (_, _) => await RunSearch(reset: true);
         }
+
+        /// <summary>Restarted by every keystroke; fires once typing pauses.</summary>
+        private readonly DispatcherTimer _typing;
+
+        /// <summary>
+        /// Which search is the current one. A search that has been superseded must not
+        /// write to the status line or clear the busy state, or a fast typist sees the
+        /// newest search report "cancelled" and the window re-enable itself while it is
+        /// still working.
+        /// </summary>
+        private int _searchGeneration;
+
+        /// <summary>The query the results on screen belong to.</summary>
+        private string _lastQuery = "";
 
         private string SortIndex =>
             ModrinthApi.SortOptions[Math.Max(0, SortCombo.SelectedIndex)].Index;
@@ -86,8 +112,24 @@ namespace MinecraftLauncher.UI
         private async void SearchBox_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key != Key.Enter) return;
+
+            // Enter still works, and now means "do not wait for the pause".
             e.Handled = true;
+            _typing.Stop();
             await RunSearch(reset: true);
+        }
+
+        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (!IsLoaded) return;
+
+            // Arrow keys, Ctrl+A and clicking about all raise this without changing
+            // anything; re-running the same search would throw away the results and
+            // fetch them again.
+            if (SearchBox.Text.Trim().Equals(_lastQuery, StringComparison.Ordinal)) return;
+
+            _typing.Stop();
+            _typing.Start();
         }
 
         private async void More_Click(object sender, RoutedEventArgs e) => await RunSearch(reset: false);
@@ -100,6 +142,9 @@ namespace MinecraftLauncher.UI
                     $"{_loaderType} does not run mods, so there is nothing to search for.";
                 return;
             }
+
+            int mine = ++_searchGeneration;
+            _lastQuery = SearchBox.Text.Trim();
 
             Busy(true, reset ? "Searching Modrinth..." : "Loading more...");
 
@@ -138,15 +183,21 @@ namespace MinecraftLauncher.UI
             }
             catch (OperationCanceledException)
             {
-                StatusLabel.Text = "Search cancelled.";
+                // Usually because the next keystroke superseded this one, in which case
+                // that search owns the status line and saying "cancelled" over the top
+                // of "Searching..." would be both wrong and alarming.
+                if (mine == _searchGeneration) StatusLabel.Text = "Search cancelled.";
             }
             catch (Exception ex)
             {
-                StatusLabel.Text = "Could not reach Modrinth: " + ex.Message;
+                if (mine == _searchGeneration)
+                    StatusLabel.Text = "Could not reach Modrinth: " + ex.Message;
             }
             finally
             {
-                Busy(false);
+                // Only the current search may hand the window back, or a superseded one
+                // re-enables everything while the newest is still running.
+                if (mine == _searchGeneration) Busy(false);
             }
         }
 
@@ -560,8 +611,11 @@ namespace MinecraftLauncher.UI
         private void Busy(bool busy, string? message = null)
         {
             SearchButton.IsEnabled = !busy;
-            SearchBox.IsEnabled = !busy;
             SortCombo.IsEnabled = !busy;
+
+            // SearchBox stays enabled. Disabling it while a search runs would take the
+            // focus away mid-word and drop the keystrokes that arrive before it comes
+            // back — which, now that typing is what starts a search, is every search.
             MoreButton.IsEnabled = !busy && _hits.Count > 0 && _hits.Count < _total;
             DownloadButton.IsEnabled = !busy && _versions.Count > 0;
 

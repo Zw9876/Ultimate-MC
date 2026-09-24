@@ -95,8 +95,8 @@ beside the exe and finds nothing.
   compiled fine and failed at run time — a wrong Java version, a silently
   misdirected installer, a profile the scanner could not see. Launch it, drive the
   UI, read the server output.
-- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 391 checks, about 11
-  seconds, exit code 0 when clean (320 of them need no internet). `-Offline` skips the network suite. Piped
+- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 435 checks, about 9
+  seconds, exit code 0 when clean (354 of them need no internet). `-Offline` skips the network suite. Piped
   anywhere it prints only failures and the count — `-ShowAll` for a line per check.
   Add to `MinecraftLauncher.Tests/Suites/` as work lands — and write the checks against
   **captured real output**, not an invented format; every parser in this project that
