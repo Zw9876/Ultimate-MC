@@ -782,6 +782,35 @@ What is genuinely outstanding:
    pre-generated. Nothing general is left to tune at that point; the next step is
    profiling to find the specific mod or contraption. Not installed on any server.
 
+7. **Requiring a mod before someone can join** — asked about 2026-09-28, researched,
+   nothing built. The user chose to sit on it, so this is the findings so the next
+   session does not repeat the search.
+
+   **Fabric has no native mechanism.** Forge and NeoForge do it in their own handshake;
+   Fabric does not, so it takes a mod. Searching Modrinth for Fabric 26.1.2 turns up
+   exactly one purpose-built option, and nothing else with meaningful adoption
+   (`kick missing mod`, `client mod verification`, `mod list check join` all return
+   nothing relevant):
+
+   - **HailWall** — "Server-side mod whitelist/blacklist: checks each player's client
+     mods on join and kicks disallowed ones." Fabric and NeoForge, lists 26.1.2.
+     **940 downloads**, so niche and lightly tested. `client_side: required`, which is
+     the catch: it has to be on every client as well, so you are back to getting one
+     mod onto all twenty machines, and it kicks at join rather than warning before
+     launch.
+
+   **The alternative is launcher-side**, and it fits what is already here: the Mods tab
+   reads mod ids from inside jars (`ModInspector`) and installs from Modrinth, so a
+   required-mods list checked before PLAY could name what is missing and offer to
+   install it — before the game starts, instead of a kick afterwards. No server-side
+   parts and no dependency on a 940-download project. It is not proof against someone
+   launching Minecraft another way, which on machines the user owns and set up is
+   probably not the threat.
+
+   **Worth being straight about either way:** a client mod check relies on the client
+   truthfully reporting what it has, and that can be spoofed. Fine for "make sure
+   everyone actually has the performance mods"; not security against cheating.
+
 Because `Core/` is UI-independent, prefer putting logic there and keeping the
 WPF code-behind thin.
 
