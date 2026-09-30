@@ -1213,6 +1213,45 @@ unresolvable host errors in ~120 ms, and a blackholed route (the realistic
 rather than `HttpClient.Timeout`. The Setup tab logs the failure and re-enables
 its button.
 
+### Where Minecraft actually comes from, and what else could serve it
+
+Asked 2026-09-30: is there another official source that might not be blocked?
+Measured rather than recalled. Installing one version touches **four hosts across
+two registrable domains**:
+
+| Host | Serves | Alternative |
+|---|---|---|
+| `piston-meta.mojang.com` | manifests, version JSON, asset index | `launchermeta.mojang.com` — **byte-identical**, verified by hash |
+| `piston-data.mojang.com` | the client jar (~30 MB) | none |
+| `libraries.minecraft.net` | 107 library jars | Maven Central for **95 of 107**, byte-identical by SHA-1 |
+| `resources.download.minecraft.net` | the assets, thousands of files | none |
+
+The 12 libraries not on Maven Central are all `com.mojang:*` — authlib, brigadier,
+datafixerupper, logging, patchy, text2speech, blocklist, jtracy and its natives.
+Only Mojang publishes those.
+
+**So alternate sources shrink the surface but cannot remove it.** A complete install
+still needs `piston-data.mojang.com` for the jar and
+`resources.download.minecraft.net` for the assets, whatever else is redirected.
+
+Two things that decide whether any of it helps, and are worth knowing before
+building anything:
+
+- **The launcher only hardcodes two of the four.** `MojangManifest.cs` has
+  `launchermeta.mojang.com` and `VersionInstaller.cs` has
+  `resources.download.minecraft.net`. The client jar and library URLs are read out
+  of the manifest, so redirecting those means rewriting URLs, not changing a
+  constant.
+- **All four resolve into one Microsoft CDN range** (`150.171.110.x` from here). An
+  IP-level block therefore hits every one of them, and only a hostname or SNI level
+  block could be dodged by swapping hostnames.
+
+`tools\Test-DownloadHosts.ps1` settles which case a machine is in: it probes each
+host separately, separates DNS failure from connection failure, and prints the
+shape — mojang.com blocked but minecraft.net not, the reverse, or both — plus what
+follows from it. Read-only, no admin. **Run that before changing any download code**;
+picking a mirror without knowing the shape of the block is guesswork.
+
 Known offline rough edge: with no skin server on the network, every **PLAY**
 blocks for ~1.5 s on the UDP discovery timeout, on the UI thread. Harmless but
 noticeable on a standalone machine.
