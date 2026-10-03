@@ -56,6 +56,10 @@ namespace MinecraftLauncher.Core
         private static readonly Regex RxLauncherFile =
             new(@"^/launcher/file/([^/?#]+)$", RegexOptions.Compiled);
 
+        /// <summary>A jar the host supplies for a required mod that is not on Modrinth.</summary>
+        private static readonly Regex RxRequiredModFile =
+            new(@"^/launcher/required-mod/([^/?#]+)$", RegexOptions.Compiled);
+
         private readonly RSA _rsa;
         private readonly string _metadataJson;
 
@@ -353,6 +357,14 @@ namespace MinecraftLauncher.Core
             {
                 await HandleLauncherFileAsync(stream, m.Groups[1].Value, request, ct);
             }
+            else if (isGet && path == RequiredMods.Endpoint)
+            {
+                await HandleRequiredModsAsync(stream, ct);
+            }
+            else if (isGet && (m = RxRequiredModFile.Match(path)).Success)
+            {
+                await HandleRequiredModFileAsync(stream, m.Groups[1].Value, ct);
+            }
             else
             {
                 Log?.Invoke($"Unmatched: {request.Method} {path}");
@@ -548,6 +560,69 @@ namespace MinecraftLauncher.Core
             {
                 Log?.Invoke($"Launcher manifest failed: {ex.Message}");
                 await SendJsonAsync(stream, 500, """{"error":"manifest unavailable"}""", ct);
+            }
+        }
+
+        /// <summary>
+        /// Serves the list of mods this host asks everyone to have.
+        /// </summary>
+        /// <remarks>
+        /// Read from disk on every request rather than cached. The launcher manifest is
+        /// cached because those files cannot change while the launcher runs; this one is
+        /// edited in the admin tab while the server is up, and the whole point is that
+        /// an edit reaches the other machines without a republish.
+        ///
+        /// A host with no list answers 200 with an empty list, not 404: "this host asks
+        /// for nothing" is a real answer, and it saves every client treating an absent
+        /// file as an error to report.
+        /// </remarks>
+        private async Task HandleRequiredModsAsync(NetworkStream stream, CancellationToken ct)
+        {
+            try
+            {
+                var listing = RequiredMods.LoadLocal();
+                Log?.Invoke($"Served required mods list ({listing.Entries.Count} entries)");
+                await SendJsonAsync(stream, 200, RequiredMods.ToJson(listing), ct);
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"Required mods list failed: {ex.Message}");
+                await SendJsonAsync(stream, 500, """{"entries":[]}""", ct);
+            }
+        }
+
+        /// <summary>
+        /// Serves a jar for a required mod that is not on Modrinth.
+        /// </summary>
+        /// <remarks>
+        /// The name is validated rather than resolved — see
+        /// <see cref="RequiredMods.JarPathOf"/>. The client verifies the SHA-1 from the
+        /// list against what arrives, so a wrong or tampered file is caught there as
+        /// well; this is the hash check the design would not go without.
+        /// </remarks>
+        private async Task HandleRequiredModFileAsync(
+            NetworkStream stream, string rawName, CancellationToken ct)
+        {
+            string name = Uri.UnescapeDataString(rawName);
+            string? path = RequiredMods.JarPathOf(name);
+
+            if (path is null)
+            {
+                Log?.Invoke($"Required mod jar not served: {name}");
+                await SendJsonAsync(stream, 404, """{"error":"no such required mod jar"}""", ct);
+                return;
+            }
+
+            try
+            {
+                byte[] bytes = await File.ReadAllBytesAsync(path, ct);
+                Log?.Invoke($"Served required mod jar {name} ({bytes.Length / 1024} KB)");
+                await SendAsync(stream, 200, "application/java-archive", bytes, ct);
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"Required mod jar {name} failed: {ex.Message}");
+                await SendJsonAsync(stream, 500, """{"error":"could not read it"}""", ct);
             }
         }
 
