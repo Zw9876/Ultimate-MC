@@ -47,7 +47,7 @@ namespace MinecraftLauncher.Tests
                 Reading();
                 Checking(dir);
                 Bundled(dir);
-                RealJar();
+                NestedJars(dir);
             }
             finally
             {
@@ -203,37 +203,74 @@ namespace MinecraftLauncher.Tests
                    ModDependencies.Check(selfish, folder).Count, 0);
         }
 
-        private static void RealJar()
+        private static void NestedJars(string root)
         {
-            Section("the real jar on disk, if it is still there");
+            Section("reading a jar out of a jar");
 
-            string jar = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "Downloads",
-                "immersively-vibed-portals-6.1.0-beta.7+mc26.1.2-b6-mc26.1.2-fabric.jar");
+            // Built here rather than read from a real download. The jar that prompted
+            // all this bundled dimlib-1.1.0+mc26.1.2, and DimLib has no 26.1.2 build on
+            // Modrinth at all — so a bundled dependency treated as missing makes a mod
+            // look impossible to require. That has to stay covered whether or not any
+            // particular file is still sitting on this machine.
+            string folder = Path.Combine(root, "nested");
+            Directory.CreateDirectory(folder);
 
-            if (!File.Exists(jar))
+            string outer = Path.Combine(folder, "carrier.jar");
+
+            using (var zip = ZipFile.Open(outer, ZipArchiveMode.Create))
             {
-                Skip("the real portals jar", "not in Downloads any more");
-                return;
+                var meta = zip.CreateEntry("fabric.mod.json");
+                using (var w = new StreamWriter(meta.Open(), new UTF8Encoding(false)))
+                    w.Write("""
+                        {"schemaVersion":1,"id":"carrier","version":"1.0.0",
+                         "depends":{"bundled_lib":"*","absent_lib":">=2.0.0"}}
+                        """);
+
+                // The nested jar has to be a complete archive in its own right.
+                byte[] innerBytes;
+                using (var memory = new MemoryStream())
+                {
+                    using (var inner = new ZipArchive(memory, ZipArchiveMode.Create, leaveOpen: true))
+                    {
+                        var innerMeta = inner.CreateEntry("fabric.mod.json");
+                        using var iw = new StreamWriter(innerMeta.Open(), new UTF8Encoding(false));
+                        iw.Write("""{"schemaVersion":1,"id":"bundled_lib","version":"1.1.0","provides":["an_old_name"]}""");
+                    }
+                    innerBytes = memory.ToArray();
+                }
+
+                var nested = zip.CreateEntry("META-INF/jars/bundled_lib-1.1.0.jar");
+                using var ns = nested.Open();
+                ns.Write(innerBytes, 0, innerBytes.Length);
             }
 
-            var facts = ModDependencies.Read(jar);
-            Check("it reads as a Fabric mod", facts is not null);
+            var facts = ModDependencies.Read(outer);
+            Check("the carrier reads as a Fabric mod", facts is not null);
             if (facts is null) return;
 
-            Expect("the id matches the captured metadata", facts.Id, "immersive_portals");
             Note($"bundles: {string.Join(", ", facts.BundledIds)}");
 
-            // The reason bundled jars have to be read: DimLib has no 26.1.2 build on
-            // Modrinth at all, so without this the mod looks impossible to satisfy.
-            Check("dimlib is found inside the jar",
-                  facts.BundledIds.Contains("dimlib", StringComparer.OrdinalIgnoreCase),
+            Check("the nested jar's id is found",
+                  facts.BundledIds.Contains("bundled_lib", StringComparer.OrdinalIgnoreCase),
+                  string.Join(", ", facts.BundledIds));
+            Check("and the alias it provides",
+                  facts.BundledIds.Contains("an_old_name", StringComparer.OrdinalIgnoreCase),
                   string.Join(", ", facts.BundledIds));
 
-            Check("so it is not reported as a missing dependency",
-                  ModDependencies.Check(facts, Path.GetTempPath())
-                                 .All(v => v.Need.ModId != "dimlib"));
+            var verdicts = ModDependencies.Check(facts, Path.Combine(root, "nowhere"));
+
+            Check("a bundled dependency is not reported missing",
+                  verdicts.All(v => v.Need.ModId != "bundled_lib"),
+                  string.Join("; ", verdicts.Select(v => v.Describe())));
+
+            Check("but one that is genuinely absent still is",
+                  verdicts.Any(v => v.Need.ModId == "absent_lib" &&
+                                    v.Standing == ModDependencies.Standing.Missing));
+
+            // The ids a carrier supplies include what it bundles, since the loader
+            // loads those too.
+            var ids = ModDependencies.InstalledIds(folder);
+            Check("a folder reports bundled ids as available", ids.ContainsKey("bundled_lib"));
         }
     }
 }
