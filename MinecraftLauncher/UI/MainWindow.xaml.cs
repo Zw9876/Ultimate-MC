@@ -240,6 +240,12 @@ namespace MinecraftLauncher.UI
             SetupTypeCombo.ItemsSource = new[] { "Releases Only", "Snapshots Only", "All Versions" };
             SetupTypeCombo.SelectedIndex = 0;
 
+            // The required-mods tab exists only where admin.flag does, so on every other
+            // machine there is nothing in the sidebar to find.
+            NavRequired.Visibility = RequiredMods.AdminEnabled
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
             UsernameBox.Text = _config.Username;
             // Provisional; RestoreServerSettings re-sizes both sliders to the machine
             // straight after this and clamps the value into range.
@@ -396,7 +402,411 @@ namespace MinecraftLauncher.UI
             ModsPanel.Visibility          = Visibility.Collapsed;
             SkinsPanel.Visibility         = Visibility.Collapsed;
             SetupPanel.Visibility         = Visibility.Collapsed;
+            RequiredPanel.Visibility      = Visibility.Collapsed;
             panel.Visibility = Visibility.Visible;
+        }
+
+        /// <summary>
+        /// Offers whatever the host wants installed for the version about to be played.
+        /// </summary>
+        /// <remarks>
+        /// Offers. It cannot stop anyone playing, and it must not: the reasons this
+        /// fails on these machines — no route to Modrinth, a host that is not up, a
+        /// mod the host forgot to put in <c>required-mods\</c> — have nothing to do
+        /// with the person pressing the button, and a launcher that refuses to start
+        /// the game over it would be worse than the problem.
+        ///
+        /// From PLAY it asks once per ask: say no and it stays no until the list for
+        /// this version and loader actually changes. The CHECK button ignores that,
+        /// because pressing it *is* changing your mind.
+        /// </remarks>
+        private async Task OfferRequiredModsAsync(string version, string loader, bool askedByPerson)
+        {
+            try
+            {
+                var log = new Progress<string>(s => ClientStatus.Text = s);
+
+                using var work = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+                var fetched = await RequiredModsClient.FetchAsync(_config, log, work.Token);
+
+                var wanted = fetched.Listing.For(version, loader);
+                if (wanted.Count == 0)
+                {
+                    if (askedByPerson)
+                        ClientStatus.Text = $"Nothing is required for {loader} on {version}.";
+                    return;
+                }
+
+                string folder = ModManager.FolderFor(version, false, loader);
+                var missing = RequiredMods.MissingIn(wanted, folder);
+
+                if (missing.Count == 0)
+                {
+                    // Having them all means an earlier "no" is spent.
+                    RequiredMods.ForgetDecline(version, loader);
+                    if (askedByPerson)
+                        ClientStatus.Text =
+                            $"You already have all {wanted.Count} required mod(s) for {loader} on {version}.";
+                    return;
+                }
+
+                string fingerprint = fetched.Listing.Fingerprint(version, loader);
+
+                if (!askedByPerson && RequiredMods.WasDeclined(version, loader, fingerprint))
+                {
+                    ClientStatus.Text =
+                        $"{missing.Count} required mod(s) still missing — use CHECK FOR REQUIRED MODS if you change your mind.";
+                    return;
+                }
+
+                string names = string.Join(Environment.NewLine, missing.Take(12).Select(m =>
+                    "    " + m.Display + (m.Why is { Length: > 0 } why ? $"  —  {why}" : "")));
+
+                if (missing.Count > 12)
+                    names += $"{Environment.NewLine}    ...and {missing.Count - 12} more";
+
+                var answer = MessageBox.Show(
+                    $"The host asks everyone playing {loader} on {version} to have " +
+                    $"{missing.Count} mod(s) you do not:{Environment.NewLine}{Environment.NewLine}" +
+                    names + Environment.NewLine + Environment.NewLine +
+                    "Download them now?" + Environment.NewLine + Environment.NewLine +
+                    "Saying no is fine — the game will start either way, and there is a " +
+                    "CHECK FOR REQUIRED MODS button on this tab if you change your mind.",
+                    "Required mods", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+                if (answer != MessageBoxResult.Yes)
+                {
+                    if (!askedByPerson) RequiredMods.RememberDecline(version, loader, fingerprint);
+                    ClientStatus.Text = "Carrying on without them.";
+                    return;
+                }
+
+                var results = await RequiredModsClient.InstallAsync(
+                    missing, folder, fetched.HostAddress, log, work.Token);
+
+                int ok = results.Count(r => r.Installed);
+                var failed = results.Where(r => !r.Installed).ToList();
+
+                if (failed.Count == 0)
+                {
+                    RequiredMods.ForgetDecline(version, loader);
+                    ClientStatus.Text = $"Installed {ok} required mod(s).";
+                }
+                else
+                {
+                    ClientStatus.Text = $"Installed {ok}, could not get {failed.Count}.";
+                    MessageBox.Show(
+                        "These could not be installed:" + Environment.NewLine + Environment.NewLine +
+                        string.Join(Environment.NewLine,
+                            failed.Take(10).Select(f => $"    {f.Entry.Display} — {f.Detail}")) +
+                        Environment.NewLine + Environment.NewLine +
+                        "The game will still start. Try again later with CHECK FOR REQUIRED MODS.",
+                        "Required mods", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Never between somebody and their game.
+                ClientStatus.Text = "Could not check required mods: " + ex.Message;
+            }
+        }
+
+        private async void CheckRequiredMods_Click(object sender, RoutedEventArgs e)
+        {
+            if (VersionCombo.SelectedItem is not string version)
+            {
+                ClientStatus.Text = "Select a version first.";
+                return;
+            }
+
+            string loader = LoaderCombo.SelectedItem as string ?? "VANILLA";
+
+            CheckRequiredButton.IsEnabled = false;
+            try { await OfferRequiredModsAsync(version, loader, askedByPerson: true); }
+            finally { CheckRequiredButton.IsEnabled = true; }
+        }
+
+        // ── Required mods (admin only) ──
+
+        private void NavRequired_Checked(object sender, RoutedEventArgs e)
+        {
+            ShowPanel(RequiredPanel);
+            RefreshRequired();
+        }
+
+        /// <summary>The list as it is being edited, saved only when SAVE is pressed.</summary>
+        private RequiredMods.Listing _required = new();
+
+        private void RefreshRequired()
+        {
+            if (ReqList is null) return;
+
+            _required = RequiredMods.LoadLocal();
+            ReqList.ItemsSource = _required.Entries.ToList();
+
+            // Offer the versions this machine actually has, so an entry cannot be made
+            // for a version nobody could install it into.
+            var versions = VersionScanner.InstalledVersions();
+            ReqVersionCombo.ItemsSource = versions;
+            if (ReqVersionCombo.SelectedIndex < 0 && versions.Count > 0) ReqVersionCombo.SelectedIndex = 0;
+
+            ShowRequiredLoaders();
+
+            ReqStatus.Text = _required.Entries.Count == 0
+                ? "Nothing required yet."
+                : $"{_required.Entries.Count} entry/entries across {_required.Versions().Count} version(s).";
+        }
+
+        /// <summary>
+        /// The loaders worth requiring mods for on the selected version.
+        /// </summary>
+        /// <remarks>
+        /// Taken from what that version actually has installed, and spelled the way the
+        /// Client tab spells it — the Client tab uses VANILLA/FABRIC/NEOFORGE, so
+        /// offering "Fabric" here would show two spellings of one thing in two tabs.
+        /// Matching is case-insensitive either way; this is so the list reads as the
+        /// same thing people see when they play.
+        ///
+        /// VANILLA is left out because it runs no mods at all, the same reason the Mods
+        /// tab stopped offering it.
+        /// </remarks>
+        private void ShowRequiredLoaders()
+        {
+            if (ReqLoaderCombo is null) return;
+
+            string? was = ReqLoaderCombo.SelectedItem as string;
+
+            var loaders = ReqVersionCombo.SelectedItem is string v
+                ? VersionScanner.AvailableLoaders(v)
+                      .Where(l => !l.Equals("VANILLA", StringComparison.OrdinalIgnoreCase)).ToList()
+                : new System.Collections.Generic.List<string>();
+
+            ReqLoaderCombo.ItemsSource = loaders;
+
+            int keep = loaders.FindIndex(l => l.Equals(was, StringComparison.OrdinalIgnoreCase));
+            ReqLoaderCombo.SelectedIndex = keep >= 0 ? keep : (loaders.Count > 0 ? 0 : -1);
+
+            if (loaders.Count == 0 && ReqVersionCombo.SelectedItem is string none)
+                ReqStatus.Text = $"{none} has no mod loader installed, so nothing can be required for it.";
+        }
+
+        private void ReqVersion_Changed(object sender, SelectionChangedEventArgs e) => ShowRequiredLoaders();
+
+        private async void ReqAdd_Click(object sender, RoutedEventArgs e)
+        {
+            if (ReqVersionCombo.SelectedItem is not string version ||
+                ReqLoaderCombo.SelectedItem is not string loader)
+            {
+                ReqStatus.Text = "Pick the version and loader this is for first.";
+                return;
+            }
+
+            var pick = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Pick the mod everyone should have",
+                Filter = "Mod jar (*.jar)|*.jar",
+                InitialDirectory = Directory.Exists(ModManager.FolderFor(version, false, loader))
+                    ? ModManager.FolderFor(version, false, loader)
+                    : Paths.BaseDir
+            };
+            if (pick.ShowDialog(this) != true) return;
+
+            string jar = pick.FileName;
+
+            // The mod id is what every client will match on, so a jar we cannot read an
+            // id out of cannot be required — say so rather than adding a dead entry.
+            string? modId = ModInspector.ModIdOf(jar);
+            if (modId is null)
+            {
+                MessageBox.Show(
+                    $"No mod id could be read out of {Path.GetFileName(jar)}.\n\n" +
+                    "Every machine decides whether it already has a required mod by the id inside " +
+                    "the jar, so without one there is nothing to check against. This is usually a " +
+                    "resource pack, a library, or a jar that is not a mod.",
+                    "Add a required mod", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            string sha1;
+            using (var stream = File.OpenRead(jar))
+                sha1 = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(stream));
+
+            ReqAddButton.IsEnabled = false;
+            ReqStatus.Text = $"Read {modId}. Asking Modrinth whether it knows this exact build...";
+
+            try
+            {
+                using var work = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var known = await ModrinthApi.VersionByHashAsync(sha1, work.Token);
+
+                RequiredMods.Entry entry;
+
+                if (known is not null)
+                {
+                    entry = new RequiredMods.Entry
+                    {
+                        Minecraft = version, Loader = loader, ModId = modId,
+                        Name = known.Name.Length > 0 ? known.Name : modId,
+                        SourceName = "modrinth",
+                        Project = known.ProjectId, VersionId = known.Id,
+                        Sha1 = sha1
+                    };
+                    ReqStatus.Text = $"Modrinth knows it: {known.VersionNumber}. Nothing to distribute.";
+                }
+                else
+                {
+                    // Not on Modrinth — a repack or a private build. The host serves it,
+                    // so a copy has to live beside the launcher.
+                    Directory.CreateDirectory(RequiredMods.JarFolder);
+                    string name = Path.GetFileName(jar);
+                    string target = Path.Combine(RequiredMods.JarFolder, name);
+                    File.Copy(jar, target, overwrite: true);
+
+                    entry = new RequiredMods.Entry
+                    {
+                        Minecraft = version, Loader = loader, ModId = modId,
+                        Name = Path.GetFileNameWithoutExtension(name),
+                        SourceName = "host",
+                        File = name, Sha1 = sha1
+                    };
+                    ReqStatus.Text = $"Modrinth does not know this build, so this host will serve {name}.";
+                }
+
+                // One entry per mod id per version and loader: adding again replaces.
+                _required.Entries.RemoveAll(x =>
+                    x.ModId.Equals(modId, StringComparison.OrdinalIgnoreCase) &&
+                    x.Minecraft.Equals(version, StringComparison.OrdinalIgnoreCase) &&
+                    x.Loader.Equals(loader, StringComparison.OrdinalIgnoreCase));
+
+                _required.Entries.Add(entry);
+                ReqList.ItemsSource = _required.Entries.ToList();
+            }
+            catch (Exception ex)
+            {
+                ReqStatus.Text = "Could not add it: " + ex.Message;
+            }
+            finally
+            {
+                ReqAddButton.IsEnabled = true;
+            }
+        }
+
+        private async void ReqChangeSource_Click(object sender, RoutedEventArgs e)
+        {
+            if (ReqList.SelectedItem is not RequiredMods.Entry entry)
+            {
+                ReqStatus.Text = "Select an entry first.";
+                return;
+            }
+
+            if (entry.From == RequiredMods.Source.Host)
+            {
+                // Host to Modrinth is only honest if Modrinth really has this build.
+                if (string.IsNullOrWhiteSpace(entry.Sha1))
+                {
+                    ReqStatus.Text = "That entry has no hash, so Modrinth cannot be asked about it.";
+                    return;
+                }
+
+                ReqStatus.Text = "Asking Modrinth whether it has this exact build...";
+
+                using var work = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var known = await ModrinthApi.VersionByHashAsync(entry.Sha1!, work.Token);
+
+                if (known is null)
+                {
+                    MessageBox.Show(
+                        $"Modrinth does not have this build of {entry.Display}.\n\n" +
+                        "It has to be served by this host. Pointing the entry at Modrinth would " +
+                        "give every machine a different file, or nothing at all.",
+                        "Change where it comes from", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    ReqStatus.Text = "Left it served by this host.";
+                    return;
+                }
+
+                Replace(entry, entry with
+                {
+                    SourceName = "modrinth",
+                    Project = known.ProjectId,
+                    VersionId = known.Id,
+                    File = null
+                });
+                ReqStatus.Text = $"Now from Modrinth: {known.VersionNumber}.";
+            }
+            else
+            {
+                // Modrinth to host needs an actual file to serve.
+                var pick = new Microsoft.Win32.OpenFileDialog
+                {
+                    Title = $"Pick the jar this host should serve for {entry.Display}",
+                    Filter = "Mod jar (*.jar)|*.jar"
+                };
+                if (pick.ShowDialog(this) != true) return;
+
+                string? id = ModInspector.ModIdOf(pick.FileName);
+                if (id is null || !id.Equals(entry.ModId, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show(
+                        $"That jar reports its mod id as '{id ?? "nothing"}', but this entry is for " +
+                        $"'{entry.ModId}'.\n\nEvery machine matches on the id, so swapping in a " +
+                        "different mod here would quietly require the wrong thing.",
+                        "Change where it comes from", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                string sha1;
+                using (var stream = File.OpenRead(pick.FileName))
+                    sha1 = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(stream));
+
+                Directory.CreateDirectory(RequiredMods.JarFolder);
+                string name = Path.GetFileName(pick.FileName);
+                File.Copy(pick.FileName, Path.Combine(RequiredMods.JarFolder, name), overwrite: true);
+
+                Replace(entry, entry with
+                {
+                    SourceName = "host", File = name, Sha1 = sha1,
+                    Project = null, VersionId = null
+                });
+                ReqStatus.Text = $"This host will now serve {name}.";
+            }
+
+            void Replace(RequiredMods.Entry old, RequiredMods.Entry fresh)
+            {
+                int at = _required.Entries.IndexOf(old);
+                if (at >= 0) _required.Entries[at] = fresh;
+                ReqList.ItemsSource = _required.Entries.ToList();
+            }
+        }
+
+        private void ReqRemove_Click(object sender, RoutedEventArgs e)
+        {
+            if (ReqList.SelectedItem is not RequiredMods.Entry entry)
+            {
+                ReqStatus.Text = "Select an entry first.";
+                return;
+            }
+
+            _required.Entries.Remove(entry);
+            ReqList.ItemsSource = _required.Entries.ToList();
+
+            // The jar in required-mods\ is left alone: another entry may point at it,
+            // and nothing here deletes a file somebody supplied.
+            ReqStatus.Text = $"Removed {entry.Display}. Press SAVE to publish the change.";
+        }
+
+        private void ReqSave_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                RequiredMods.SaveLocal(_required);
+                ReqStatus.Text =
+                    $"Saved. {_required.Entries.Count} entry/entries published — the other machines " +
+                    "pick this up the next time somebody presses PLAY.";
+            }
+            catch (Exception ex)
+            {
+                ReqStatus.Text = "Could not save: " + ex.Message;
+            }
         }
 
         private void NavClient_Checked(object sender, RoutedEventArgs e) => ShowPanel(ClientPanel);
@@ -522,7 +932,7 @@ namespace MinecraftLauncher.UI
             MemAdvice.Text = advice;
         }
 
-        private void PlayButton_Click(object sender, RoutedEventArgs e)
+        private async void PlayButton_Click(object sender, RoutedEventArgs e)
         {
             if (VersionCombo.SelectedItem is not string version)
             {
@@ -543,6 +953,11 @@ namespace MinecraftLauncher.UI
             _config.LastVersion = version;
             _config.LastLoader = loader;
             _config.Save();
+
+            // Before the game starts, because mods have to be on disk before Minecraft
+            // reads the folder — and before the launcher closes, because after PLAY
+            // there is no window left to ask in.
+            await OfferRequiredModsAsync(version, loader, askedByPerson: false);
 
             try
             {

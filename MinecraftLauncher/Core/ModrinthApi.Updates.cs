@@ -124,6 +124,32 @@ namespace MinecraftLauncher.Core
         }
 
         /// <summary>
+        /// The published version a jar's SHA-1 belongs to, or null if Modrinth has
+        /// never seen that file.
+        /// </summary>
+        /// <remarks>
+        /// This is what lets the admin tab work out on its own whether a jar needs to be
+        /// served by the host: if Modrinth recognises the exact build, the entry can
+        /// point at Modrinth and no file has to be distributed. Null is a real answer,
+        /// not an error — a hand-built or repacked jar is legitimately unknown.
+        /// </remarks>
+        public static async Task<ModVersion?> VersionByHashAsync(string sha1, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(sha1)) return null;
+
+            try
+            {
+                var found = await LookupAsync($"{Root}/version_files", new[] { sha1.ToLowerInvariant() },
+                                              loader: "", gameVersion: "", includeTarget: false, ct);
+                return found.Values.FirstOrDefault();
+            }
+            catch (Exception ex) when (ex is HttpRequestException or JsonException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Posts a batch of hashes to one of the two lookup endpoints and reads the
         /// hash-keyed reply.
         /// </summary>

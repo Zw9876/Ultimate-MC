@@ -281,6 +281,47 @@ including where WebView2 is loaded from — depends on it.
     NeoForge rather than guessed at, because NeoForge used that file up to 1.20.1.
   - A jar declaring nothing is left alone — plenty of legitimate library jars carry
     no descriptor, and disabling those would break working setups.
+- **Required mods** — the host names mods it wants everyone to have, and PLAY offers
+  to install whatever is missing for the version being launched.
+  `Core/RequiredMods.cs`, `Core/RequiredModsClient.cs`.
+  - **It offers; it never blocks.** Say no and the game starts. The reasons this fails
+    here — no route to Modrinth, a host that is not up, a jar the host forgot to put
+    in `required-mods\` — have nothing to do with the person pressing PLAY.
+  - **Checked at PLAY, not at startup.** A machine already on the current build would
+    never re-check if this hung off the launcher update, and the update path is a timed
+    countdown and a file swap, sometimes with Minecraft running. There is also a
+    **CHECK FOR REQUIRED MODS** button on the Client tab using the version selected
+    there, which is how someone changes their mind.
+  - **Say no once and it stays no** until the ask changes — tracked as a fingerprint
+    over that version and loader's entries, so pinning a different build re-asks while
+    editing an unrelated version does not nag. The CHECK button ignores it, because
+    pressing it *is* changing your mind.
+  - **Entries carry the mod id**, so "do I have this?" is a filesystem question
+    answered offline; the network is needed only to install. Keyed on version **and**
+    loader, because `versions/<v>/mods` is shared by every loader on a version.
+  - **Two sources.** Modrinth, pinned to a version id so every machine gets the same
+    build; or **served by the host** over its skin server for anything not published —
+    the first real case being a *downgraded* mod. A host-served entry is satisfied only
+    by its exact **hash**, not the mod id, because a repack carries the original mod's
+    id and matching on that would call the requirement met while the wrong build sat
+    there. Installing one also turns off any other copy of the same id, or the loader
+    sees one mod twice and refuses to start.
+  - **A hidden REQUIRED tab** does the editing, and appears only where `admin.flag`
+    sits beside the launcher — so it is simply not in anyone else's sidebar. "Add a
+    jar…" reads the mod id and hash out of the file and asks Modrinth whether it knows
+    that exact build: if it does the entry points at Modrinth, if not the jar is copied
+    into `required-mods\` and this host serves it. Either source can be switched
+    afterwards, and switching to Modrinth is refused when Modrinth does not actually
+    have that build.
+  - Endpoints: `/launcher/required-mods` and `/launcher/required-mod/<file>`, both
+    read from disk per request — unlike the launcher manifest, which is cached because
+    those files cannot change while it runs. The list is deliberately **not** in the
+    update package for that reason, and so an edit reaches everyone without a
+    republish.
+  - **Known cost:** PLAY now does UDP host discovery for this as well as for the skin
+    server, so about 1.5 s more before the game starts on a machine with no host. See
+    section 10.
+
 - **"Delete disabled" on the Mods tab** — clears out every `.jar.disabled` in the
   folder. Switching a version between loaders a few times fills it with turned-off
   jars until the list stops being readable, which is the whole reason it exists.
@@ -782,9 +823,18 @@ What is genuinely outstanding:
    pre-generated. Nothing general is left to tune at that point; the next step is
    profiling to find the specific mod or contraption. Not installed on any server.
 
-7. **Requiring a mod before someone can join** — asked about 2026-09-28, researched,
-   nothing built. The user chose to sit on it, so this is the findings so the next
-   session does not repeat the search.
+7. **PLAY discovers the host twice.** The required-mods check and the skin server each
+   run their own UDP discovery, so a machine with no host pays the 1500 ms
+   `ProbeWindow` twice before the game starts. Neither is wrong on its own; together
+   they are the bulk of the launch delay. The fix is to discover once per session and
+   share the answer — `MainWindow` already does a lookup at startup for updates, so
+   there is somewhere obvious to keep it. Measured, not guessed: hashing and reading
+   the whole 34 MB mods folder is 0.3 s, so discovery is what the time goes on.
+
+8. **Requiring a mod before someone can *join*** — asked about 2026-09-28, researched,
+   nothing built. **Superseded in practice** by the required-mods feature in section 5,
+   which provisions rather than enforces; this remains the note on true server-side
+   enforcement, which is a different thing.
 
    **Fabric has no native mechanism.** Forge and NeoForge do it in their own handshake;
    Fabric does not, so it takes a mod. Searching Modrinth for Fabric 26.1.2 turns up
@@ -1262,7 +1312,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **452 checks, about 11 seconds** — 371 of them with no internet.
+`MinecraftLauncher.Tests/` — **505 checks, about 11 seconds** — 424 of them with no internet.
 
 ```powershell
 tools\run-tests.ps1                 # everything
@@ -1300,13 +1350,21 @@ sessions before being kept:
 
 **UI Automation cannot see a `MessageBox`.** Driving a button whose handler shows one
 looks exactly like a handler that never ran: `InvokePattern.Invoke` returns straight
-away (it does not wait for the action), the status line still reads whatever it said
-before, and enumerating top-level windows finds nothing new. Hours went into chasing a
-"stale build" that did not exist. Answer the dialog with a keystroke instead —
-`AppActivate` the process then `SendKeys` `{ENTER}` for the default button or `{ESC}`
-to cancel — and assert on what changed on disk. `drive-purge2` in the session
-scratchpad is the shape that works; the Esc case is worth keeping, because "saying no
-deletes nothing" is the check that matters.
+away (it does not wait for the action), enumerating top-level windows finds nothing
+new, and the status line still reads whatever it said *before* — because the modal
+loop keeps pumping messages, so UIA reads succeed and hand back the stale value.
+Hours went into chasing a "stale build" that did not exist, twice.
+
+Answer it with a keystroke instead: `AppActivate` the process, then `SendKeys`.
+
+**`{ESC}` does nothing on a Yes/No box.** It has no Cancel button, so Escape is not
+"No" — it is ignored and the dialog just sits there. Send **`n`** for No and
+`{ENTER}` for the default. This matters more than it sounds: a test that sends
+`{ESC}` and then asserts "saying no changed nothing" passes whatever the code does,
+because the dialog never closed and nothing could have happened. One check in the
+delete-disabled drive passed that way before this was understood.
+
+Then assert on what changed **on disk**, not on the status line.
 
 Things worth knowing before changing it:
 

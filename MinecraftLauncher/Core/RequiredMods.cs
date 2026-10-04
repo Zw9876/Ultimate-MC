@@ -97,6 +97,16 @@ namespace MinecraftLauncher.Core
             [JsonIgnore]
             public string Display => Name.Length > 0 ? Name : ModId;
 
+            /// <summary>For the admin list.</summary>
+            [JsonIgnore]
+            public string SourceDisplay => From == Source.Host ? "This host" : "Modrinth";
+
+            /// <summary>What identifies the build, for the admin list.</summary>
+            [JsonIgnore]
+            public string Detail => From == Source.Host
+                ? File ?? "(no file)"
+                : VersionId is { Length: > 0 } v ? v : $"{Project} (newest)";
+
             /// <summary>
             /// False for an entry that could never be acted on, so a typo in the list
             /// is skipped rather than throwing in front of someone pressing PLAY.
@@ -195,6 +205,18 @@ namespace MinecraftLauncher.Core
 
         /// <summary>Whether this machine publishes a list at all.</summary>
         public static bool HasLocalList => File.Exists(LocalPath);
+
+        /// <summary>
+        /// Whether the editing tab is offered on this machine.
+        /// </summary>
+        /// <remarks>
+        /// An empty <c>admin.flag</c> beside the launcher, and nothing more. There is
+        /// no password because there is no adversary — the point is that the tab is not
+        /// on anyone else's launcher to be poked at, and the file only exists on the
+        /// machine that maintains the list. It is not in the update package, so an
+        /// update neither grants it nor takes it away.
+        /// </remarks>
+        public static bool AdminEnabled => File.Exists(Path.Combine(Paths.BaseDir, "admin.flag"));
 
         // ── jars the host serves itself ──
 

@@ -35,6 +35,12 @@
                          Checked="NavSetup_Checked"
                          Style="{StaticResource NavStyle}"/>
 
+            <!-- Shown only when admin.flag sits beside the launcher, so this is simply
+                 not present on anybody else's copy. -->
+            <RadioButton x:Name="NavRequired" Content="REQUIRED" GroupName="nav"
+                         Visibility="Collapsed" Checked="NavRequired_Checked"
+                         Style="{StaticResource NavStyle}"/>
+
             <!-- Appears only when a machine on the network is running a newer
                  launcher. Lives in the sidebar so it is visible from every tab
                  without disturbing the tab layouts. -->
@@ -174,9 +180,14 @@
 
                     <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                         <Button x:Name="CrashReportsButton" Content="Crash reports…"
-                                Width="150" Height="32"
+                                Width="150" Height="32" Margin="0,0,8,0"
                                 Click="CrashReports_Click" Style="{StaticResource PlainButton}"
                                 ToolTip="If the game closed by itself, this says why — in plain English, and which mod did it"/>
+
+                        <Button x:Name="CheckRequiredButton" Content="Check for required mods"
+                                Width="180" Height="32"
+                                Click="CheckRequiredMods_Click" Style="{StaticResource PlainButton}"
+                                ToolTip="Asks the host whether anything is wanted for the version selected above, and offers to install it"/>
 
                         <TextBlock x:Name="CrashHintLabel" VerticalAlignment="Center" Margin="12,0,0,0"
                                    Foreground="{StaticResource MutedBrush}" FontSize="11"
@@ -847,6 +858,94 @@
                          Background="#101010" Foreground="{StaticResource MutedBrush}"
                          BorderThickness="0" FontFamily="Consolas" FontSize="11"
                          VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+            </Grid>
+
+            <!-- ══ REQUIRED MODS TAB ══
+                 Only on a machine with admin.flag beside the launcher. Everyone else
+                 never sees it, which is the whole of the "hidden" requirement. -->
+            <Grid x:Name="RequiredPanel" Visibility="Collapsed" Margin="0,160,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
+                    <TextBlock Text="REQUIRED MODS" Style="{StaticResource SectionLabel}"/>
+                    <TextBlock x:Name="ReqNote" Foreground="{StaticResource MutedBrush}"
+                               FontSize="11" TextWrapping="Wrap" Margin="0,2,0,12"
+                               Text="This list is published to every machine on the network. When somebody presses PLAY, their launcher offers to download whatever is missing for the version they are starting. They can say no and the game still launches."/>
+                </StackPanel>
+
+                <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="ADD A MOD" Style="{StaticResource SectionLabel}"/>
+                        <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11"
+                                   TextWrapping="Wrap" Margin="0,2,0,10"
+                                   Text="Pick the jar you want everyone to have. Its mod id and hash are read from the file, and Modrinth is asked whether it knows that exact build — if it does the entry points at Modrinth, and if it does not the jar is served by this host instead. Either way you can change it afterwards."/>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="FOR VERSION" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="ReqVersionCombo" Height="30"
+                                          SelectionChanged="ReqVersion_Changed"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="FOR LOADER" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="ReqLoaderCombo" Height="30"/>
+                            </StackPanel>
+
+                            <Button Grid.Column="4" x:Name="ReqAddButton" Content="ADD A JAR…"
+                                    Width="150" Height="30" VerticalAlignment="Bottom"
+                                    Click="ReqAdd_Click" Style="{StaticResource AccentButton}"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="2" Style="{StaticResource Card}" Padding="2">
+                    <ListView x:Name="ReqList" BorderThickness="0" Background="Transparent">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Version" Width="90"
+                                                DisplayMemberBinding="{Binding Minecraft}"/>
+                                <GridViewColumn Header="Loader" Width="90"
+                                                DisplayMemberBinding="{Binding Loader}"/>
+                                <GridViewColumn Header="Mod" Width="200"
+                                                DisplayMemberBinding="{Binding Display}"/>
+                                <GridViewColumn Header="Mod id" Width="170"
+                                                DisplayMemberBinding="{Binding ModId}"/>
+                                <GridViewColumn Header="Comes from" Width="100"
+                                                DisplayMemberBinding="{Binding SourceDisplay}"/>
+                                <GridViewColumn Header="Build" Width="240"
+                                                DisplayMemberBinding="{Binding Detail}"/>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </Border>
+
+                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,12,0,0">
+                    <Button x:Name="ReqChangeSourceButton" Content="Change where it comes from…"
+                            Width="210" Height="32" Margin="0,0,8,0"
+                            Click="ReqChangeSource_Click" Style="{StaticResource PlainButton}"
+                            ToolTip="Switch the selected entry between Modrinth and this host"/>
+                    <Button x:Name="ReqRemoveButton" Content="Remove" Width="100" Height="32"
+                            Margin="0,0,8,0" Click="ReqRemove_Click" Style="{StaticResource PlainButton}"/>
+                    <Button x:Name="ReqSaveButton" Content="SAVE &amp; PUBLISH" Width="150" Height="32"
+                            Margin="0,0,8,0" Click="ReqSave_Click" Style="{StaticResource AccentButton}"
+                            ToolTip="Writes required-mods.json. Clients pick it up the next time somebody presses PLAY."/>
+                    <TextBlock x:Name="ReqStatus" VerticalAlignment="Center" Margin="8,0,0,0"
+                               Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                </StackPanel>
             </Grid>
         </Grid>
     </Grid>
