@@ -188,7 +188,27 @@ namespace MinecraftLauncher.Core
                 return new Outcome(entry, false, "what arrived did not match the expected hash");
             }
 
-            return new Outcome(entry, true, "from the host");
+            // A downgraded mod is a repack of somebody else's, so it carries the
+            // original's mod id. If the upstream build is also sitting here the loader
+            // sees one mod twice and refuses to start, naming the mod rather than the
+            // files. Turn the others off — renamed, not deleted, like everywhere else.
+            int supersededCount = 0;
+            foreach (string other in ModInspector.OtherCopiesOf(target, modsFolder))
+            {
+                string otherName = Path.GetFileName(other);
+                if (otherName.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase)) continue;
+
+                if (ModManager.SetEnabled(modsFolder, otherName, false))
+                {
+                    supersededCount++;
+                    log?.Report($"Turned off {otherName}, which is the same mod.");
+                }
+            }
+
+            return new Outcome(entry, true,
+                supersededCount == 0
+                    ? "from the host"
+                    : $"from the host, replacing {supersededCount} other copy/copies");
         }
     }
 }

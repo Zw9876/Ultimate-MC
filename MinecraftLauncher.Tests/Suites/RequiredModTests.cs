@@ -227,6 +227,33 @@ namespace MinecraftLauncher.Tests
                        RequiredMods.MissingIn(wanted, Path.Combine(work, "nope")).Count, 3);
                 Expect("wanting nothing is never missing anything",
                        RequiredMods.MissingIn(Array.Empty<RequiredMods.Entry>(), work).Count, 0);
+
+                // A host-served entry is the downgraded-mod case: a repack carries the
+                // ORIGINAL mod's id, so matching on the id would see the upstream build
+                // sitting there and call the requirement met. The hash is what decides.
+                string onPath = Path.Combine(work, onName);
+                string realSha1;
+                using (var s = File.OpenRead(onPath))
+                    realSha1 = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(s));
+
+                var hashes = RequiredMods.Sha1sIn(work);
+                Check("the folder's hashes are read", hashes.Contains(realSha1), realSha1[..12]);
+
+                var pinnedToThisJar = Mod(onId, source: "host", project: null,
+                                          file: "whatever.jar", sha1: realSha1);
+                Expect("a host entry matching the installed hash is satisfied",
+                       RequiredMods.MissingIn(new[] { pinnedToThisJar }, work).Count, 0);
+
+                var pinnedToAnother = Mod(onId, source: "host", project: null,
+                                          file: "whatever.jar",
+                                          sha1: new string('a', 40));
+                Expect("the same mod id with a DIFFERENT hash is still missing",
+                       RequiredMods.MissingIn(new[] { pinnedToAnother }, work).Count, 1);
+
+                // The distinction that matters: Modrinth entries keep matching on id,
+                // so somebody who updated a mod themselves is not fought with.
+                Expect("a Modrinth entry is satisfied by any build of that mod",
+                       RequiredMods.MissingIn(new[] { Mod(onId) }, work).Count, 0);
             }
             finally
             {

@@ -254,11 +254,67 @@ namespace MinecraftLauncher.Core
             return ids;
         }
 
+        /// <summary>The SHA-1 of every jar in a folder, enabled or not.</summary>
+        public static HashSet<string> Sha1sIn(string modsFolder)
+        {
+            var hashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(modsFolder) || !Directory.Exists(modsFolder)) return hashes;
+
+            foreach (string path in Directory.EnumerateFiles(modsFolder))
+            {
+                string name = Path.GetFileName(path);
+                if (!name.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) &&
+                    !name.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                try
+                {
+                    using var stream = File.OpenRead(path);
+                    hashes.Add(Convert.ToHexString(SHA1.HashData(stream)));
+                }
+                catch (IOException) { /* a jar being written; it will be seen next time */ }
+            }
+
+            return hashes;
+        }
+
+        /// <summary>
+        /// Whether a folder already satisfies one entry.
+        /// </summary>
+        /// <remarks>
+        /// A host-served entry with a hash is satisfied only by **that exact jar**, not
+        /// merely by the mod id. This exists because the first real use of it is a
+        /// *downgraded* mod — a repack of somebody else's — which carries the original
+        /// mod's id inside it. Matching on the id alone would see the upstream build
+        /// already installed, call the requirement met, and never deliver the build that
+        /// was actually asked for.
+        ///
+        /// Modrinth entries still match on mod id. Their pinned version is a real
+        /// published build, and treating "some build of Sodium" as satisfying "Sodium"
+        /// is the right answer there — forcing an exact hash would fight every person
+        /// who updated a mod themselves.
+        /// </remarks>
+        private static bool Satisfied(Entry entry, HashSet<string> modIds, HashSet<string>? sha1s) =>
+            entry.From == Source.Host && !string.IsNullOrWhiteSpace(entry.Sha1)
+                ? sha1s is not null && sha1s.Contains(entry.Sha1!)
+                : modIds.Contains(entry.ModId);
+
         /// <summary>Which of the wanted mods this folder does not have.</summary>
         public static List<Entry> MissingIn(IEnumerable<Entry> wanted, string modsFolder)
         {
+            var list = wanted.Where(e => e.Usable).ToList();
+            if (list.Count == 0) return list;
+
             var have = ModIdsIn(modsFolder);
-            return wanted.Where(e => e.Usable && !have.Contains(e.ModId)).ToList();
+
+            // Hashing every jar costs real time, so only do it when an entry actually
+            // pins one.
+            HashSet<string>? hashes = list.Any(e => e.From == Source.Host &&
+                                                    !string.IsNullOrWhiteSpace(e.Sha1))
+                ? Sha1sIn(modsFolder)
+                : null;
+
+            return list.Where(e => !Satisfied(e, have, hashes)).ToList();
         }
 
         // ── remembering a "no" ──
