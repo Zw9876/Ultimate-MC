@@ -158,9 +158,6 @@ namespace MinecraftLauncher.Core
             RequiredMods.Entry entry, string modsFolder, string? hostAddress,
             IProgress<string>? log, CancellationToken ct)
         {
-            if (string.IsNullOrWhiteSpace(hostAddress))
-                return new Outcome(entry, false, "only the host has this one, and it is not reachable");
-
             // Validated the same way the server validates it, so a list entry cannot
             // name somewhere else on this machine to write to.
             string name = entry.File!;
@@ -175,12 +172,36 @@ namespace MinecraftLauncher.Core
             if (File.Exists(target) || File.Exists(target + ".disabled"))
                 return new Outcome(entry, true, "already there");
 
-            string url = $"http://{hostAddress}/launcher/required-mod/{Uri.EscapeDataString(name)}";
+            // On the host itself there is no remote host to fetch from — discovery
+            // prefers a *remote* server and its own reads as local — but the jar is
+            // sitting in required-mods\ right here. Without this the one machine that
+            // publishes the list is the one machine that cannot satisfy it, which is
+            // absurd given the host plays too.
+            string? beside = RequiredMods.JarPathOf(name);
+            bool ok;
 
-            // The hash is the point. This jar comes over plain HTTP from a machine on
-            // the LAN, so what arrives is checked against what the list said before it
-            // is left in a folder the game will load code from.
-            bool ok = await Downloader.GetVerifiedAsync(url, target, entry.Sha1!, log, ct);
+            if (beside is not null)
+            {
+                log?.Report($"Taking {name} from this machine's own required-mods folder.");
+                File.Copy(beside, target, overwrite: true);
+
+                // Hashed even here. A local copy rules out the network, not a list that
+                // has drifted from the jar beside it.
+                ok = Verify(target, entry.Sha1!);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(hostAddress))
+                    return new Outcome(entry, false,
+                        "only the host has this one, and no host is reachable");
+
+                string url = $"http://{hostAddress}/launcher/required-mod/{Uri.EscapeDataString(name)}";
+
+                // The hash is the point. This jar comes over plain HTTP from a machine
+                // on the LAN, so what arrives is checked against what the list said
+                // before it is left in a folder the game will load code from.
+                ok = await Downloader.GetVerifiedAsync(url, target, entry.Sha1!, log, ct);
+            }
 
             if (!ok)
             {
@@ -205,10 +226,27 @@ namespace MinecraftLauncher.Core
                 }
             }
 
+            string where = beside is not null ? "from this machine" : "from the host";
+
             return new Outcome(entry, true,
                 supersededCount == 0
-                    ? "from the host"
-                    : $"from the host, replacing {supersededCount} other copy/copies");
+                    ? where
+                    : $"{where}, replacing {supersededCount} other copy/copies");
+        }
+
+        private static bool Verify(string path, string expectedSha1)
+        {
+            try
+            {
+                using var stream = File.OpenRead(path);
+                string actual = Convert.ToHexString(
+                    System.Security.Cryptography.SHA1.HashData(stream));
+                return actual.Equals(expectedSha1, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (IOException)
+            {
+                return false;
+            }
         }
     }
 }
