@@ -318,6 +318,22 @@ including where WebView2 is loaded from — depends on it.
     those files cannot change while it runs. The list is deliberately **not** in the
     update package for that reason, and so an edit reaches everyone without a
     republish.
+  - **Dependencies are read out of the jar and offered too.** `Core/ModDependencies.cs`
+    reads `depends`, `provides`, `breaks` and the nested `META-INF/jars/*.jar`, and the
+    admin tab resolves whatever is unmet on Modrinth and adds it as a pinned entry.
+    Resolved on the machine with internet, not per client, or twenty machines end up on
+    twenty builds.
+  - **An entry can demand a minimum version** (`requires`, a Fabric predicate), and
+    this is not optional sugar. The first real mod required here needs
+    `fabric-api >= 0.154.2` and every machine had **0.152.1**. A presence check answers
+    "fabric-api? yes, got it" and the game then fails to start on all of them —
+    *a dependency is not present-or-absent, it is present at a good enough version*.
+    An unparsable predicate counts as satisfied rather than nagging about something
+    unanswerable, the same rule the loader checks use.
+  - **Nested jars have to be read or a mod can look impossible.** That portals build
+    bundles `dimlib-1.1.0+mc26.1.2`, and DimLib has **no 26.1.2 build on Modrinth at
+    all** — treating it as missing would have made the mod unrequireable. It also
+    bundles cloth-config, and `provides` three aliases for its own id.
   - **Known cost:** PLAY now does UDP host discovery for this as well as for the skin
     server, so about 1.5 s more before the game starts on a machine with no host. See
     section 10.
@@ -1312,7 +1328,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **505 checks, about 11 seconds** — 424 of them with no internet.
+`MinecraftLauncher.Tests/` — **550 checks, about 8 seconds** — 469 of them with no internet.
 
 ```powershell
 tools\run-tests.ps1                 # everything

@@ -90,6 +90,19 @@ namespace MinecraftLauncher.Core
             /// <summary>Why it is wanted, shown in the prompt when present.</summary>
             [JsonPropertyName("why")]       public string? Why       { get; init; }
 
+            /// <summary>
+            /// A Fabric version predicate the installed copy must satisfy, such as
+            /// <c>&gt;=0.154.2</c>.
+            /// </summary>
+            /// <remarks>
+            /// Without this an entry means "have this mod", and a machine with an old
+            /// build satisfies it. That is exactly the trap a dependency sets: every
+            /// machine had fabric-api 0.152.1, the portals mod needed 0.154.2, and
+            /// "fabric-api? yes" would have let all of them fail to start. With a
+            /// predicate the entry means "have this mod, new enough".
+            /// </remarks>
+            [JsonPropertyName("requires")]  public string? Requires  { get; init; }
+
             [JsonIgnore]
             public Source From => SourceName.Equals("host", StringComparison.OrdinalIgnoreCase)
                 ? Source.Host : Source.Modrinth;
@@ -103,9 +116,19 @@ namespace MinecraftLauncher.Core
 
             /// <summary>What identifies the build, for the admin list.</summary>
             [JsonIgnore]
-            public string Detail => From == Source.Host
-                ? File ?? "(no file)"
-                : VersionId is { Length: > 0 } v ? v : $"{Project} (newest)";
+            public string Detail
+            {
+                get
+                {
+                    string what = From == Source.Host
+                        ? File ?? "(no file)"
+                        : VersionId is { Length: > 0 } v ? v : $"{Project} (newest)";
+
+                    return string.IsNullOrWhiteSpace(Requires) || Requires == "*"
+                        ? what
+                        : $"{what}   (needs {Requires})";
+                }
+            }
 
             /// <summary>
             /// False for an entry that could never be acted on, so a typo in the list
@@ -151,7 +174,7 @@ namespace MinecraftLauncher.Core
             public string Fingerprint(string mcVersion, string loaderType)
             {
                 var parts = For(mcVersion, loaderType)
-                    .Select(e => $"{e.ModId}|{e.SourceName}|{e.Project}|{e.VersionId}|{e.File}|{e.Sha1}")
+                    .Select(e => $"{e.ModId}|{e.SourceName}|{e.Project}|{e.VersionId}|{e.File}|{e.Sha1}|{e.Requires}")
                     .OrderBy(s => s, StringComparer.Ordinal);
 
                 string joined = string.Join("\n", parts);
@@ -316,10 +339,52 @@ namespace MinecraftLauncher.Core
         /// is the right answer there — forcing an exact hash would fight every person
         /// who updated a mod themselves.
         /// </remarks>
-        private static bool Satisfied(Entry entry, HashSet<string> modIds, HashSet<string>? sha1s) =>
-            entry.From == Source.Host && !string.IsNullOrWhiteSpace(entry.Sha1)
-                ? sha1s is not null && sha1s.Contains(entry.Sha1!)
-                : modIds.Contains(entry.ModId);
+        private static bool Satisfied(
+            Entry entry, HashSet<string> modIds, HashSet<string>? sha1s,
+            Dictionary<string, string?>? versions)
+        {
+            if (entry.From == Source.Host && !string.IsNullOrWhiteSpace(entry.Sha1))
+                return sha1s is not null && sha1s.Contains(entry.Sha1!);
+
+            if (!modIds.Contains(entry.ModId)) return false;
+
+            if (string.IsNullOrWhiteSpace(entry.Requires) || entry.Requires == "*") return true;
+
+            // Present, but is it new enough? A predicate nobody can parse counts as
+            // satisfied rather than nagging forever about something unanswerable —
+            // the same "cannot tell says nothing" rule the loader checks use.
+            string? have = versions is not null && versions.TryGetValue(entry.ModId, out var v) ? v : null;
+            return VersionRange.SatisfiesFabric(have, entry.Requires) != false;
+        }
+
+        /// <summary>
+        /// Mod id to its own version, for every jar in a folder including turned-off ones.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately counts disabled jars, unlike
+        /// <see cref="ModDependencies.InstalledIds"/> which must not: there, a
+        /// turned-off mod genuinely cannot satisfy a dependency at run time. Here the
+        /// question is whether somebody *has* the mod, and switching it off was their
+        /// decision to make.
+        /// </remarks>
+        public static Dictionary<string, string?> ModVersionsIn(string modsFolder)
+        {
+            var found = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(modsFolder) || !Directory.Exists(modsFolder)) return found;
+
+            foreach (string path in Directory.EnumerateFiles(modsFolder))
+            {
+                string name = Path.GetFileName(path);
+                if (!name.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) &&
+                    !name.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var facts = ModDependencies.Read(path);
+                if (facts?.Id is { Length: > 0 }) found[facts.Id] = facts.Version;
+            }
+
+            return found;
+        }
 
         /// <summary>Which of the wanted mods this folder does not have.</summary>
         public static List<Entry> MissingIn(IEnumerable<Entry> wanted, string modsFolder)
@@ -336,7 +401,14 @@ namespace MinecraftLauncher.Core
                 ? Sha1sIn(modsFolder)
                 : null;
 
-            return list.Where(e => !Satisfied(e, have, hashes)).ToList();
+            // Reading every jar's own version is only needed when something asks for a
+            // minimum, which is the dependency case rather than the common one.
+            Dictionary<string, string?>? versions = list.Any(e =>
+                    !string.IsNullOrWhiteSpace(e.Requires) && e.Requires != "*")
+                ? ModVersionsIn(modsFolder)
+                : null;
+
+            return list.Where(e => !Satisfied(e, have, hashes, versions)).ToList();
         }
 
         // ── remembering a "no" ──

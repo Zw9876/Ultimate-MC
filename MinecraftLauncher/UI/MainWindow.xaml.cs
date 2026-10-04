@@ -680,6 +680,8 @@ namespace MinecraftLauncher.UI
 
                 _required.Entries.Add(entry);
                 ReqList.ItemsSource = _required.Entries.ToList();
+
+                await OfferDependenciesAsync(jar, version, loader, work.Token);
             }
             catch (Exception ex)
             {
@@ -689,6 +691,111 @@ namespace MinecraftLauncher.UI
             {
                 ReqAddButton.IsEnabled = true;
             }
+        }
+
+        /// <summary>
+        /// Checks what the jar being required says it needs, and offers to require that too.
+        /// </summary>
+        /// <remarks>
+        /// This exists because of a near-miss. A downgraded Immersive Portals build was
+        /// about to go out; it needs <c>fabric-api &gt;= 0.154.2</c> and every machine
+        /// had 0.152.1. Requiring just the mod would have stopped the game starting on
+        /// all of them, and the only clue would have been a crash report.
+        ///
+        /// Resolved here, on the machine with internet, and written into the list as
+        /// pinned entries — rather than each client resolving for itself, which is how
+        /// twenty machines end up on twenty different builds. The predicate goes in too,
+        /// because a machine that already has an old copy has to be told to upgrade
+        /// rather than told it is fine.
+        /// </remarks>
+        private async Task OfferDependenciesAsync(
+            string jar, string version, string loader, CancellationToken ct)
+        {
+            var facts = ModDependencies.Read(jar);
+            if (facts is null) return;
+
+            string folder = ModManager.FolderFor(version, false, loader);
+
+            var conflicts = ModDependencies.ConflictsIn(facts, folder);
+            var wanted = ModDependencies.Check(facts, folder).Where(v => v.NeedsAction).ToList();
+
+            if (conflicts.Count > 0)
+                MessageBox.Show(
+                    $"{facts.Name ?? facts.Id} says it cannot run alongside:" +
+                    Environment.NewLine + Environment.NewLine +
+                    string.Join(Environment.NewLine, conflicts.Select(c => "    " + c)) +
+                    Environment.NewLine + Environment.NewLine +
+                    "Those are installed on this machine. Requiring this mod will not remove " +
+                    "them, and the game may not start where they are both present.",
+                    "Conflicting mods", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+            if (wanted.Count == 0)
+            {
+                ReqStatus.Text += "  Its dependencies are already met here.";
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                $"{facts.Name ?? facts.Id} needs these, and this machine does not have them:" +
+                Environment.NewLine + Environment.NewLine +
+                string.Join(Environment.NewLine, wanted.Select(v => "    " + v.Describe())) +
+                Environment.NewLine + Environment.NewLine +
+                "Add them to the required list as well, pinned to the newest build that fits " +
+                $"{loader} on {version}?" + Environment.NewLine + Environment.NewLine +
+                "Without them the game will not start on machines that are missing them.",
+                "Dependencies", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.Yes)
+            {
+                ReqStatus.Text = $"Added, but {wanted.Count} dependency/dependencies are unmet.";
+                return;
+            }
+
+            int added = 0;
+            var failed = new List<string>();
+
+            foreach (var need in wanted)
+            {
+                ReqStatus.Text = $"Looking up {need.Need.ModId} on Modrinth...";
+
+                try
+                {
+                    // The mod id is usually the Modrinth slug, which is what makes this
+                    // possible at all without the admin hunting for project pages.
+                    var versions = await ModrinthApi.VersionsAsync(need.Need.ModId, version, loader, ct);
+                    var best = ModrinthApi.BestOf(versions);
+
+                    if (best?.File is null) { failed.Add(need.Need.ModId); continue; }
+
+                    _required.Entries.RemoveAll(x =>
+                        x.ModId.Equals(need.Need.ModId, StringComparison.OrdinalIgnoreCase) &&
+                        x.Minecraft.Equals(version, StringComparison.OrdinalIgnoreCase) &&
+                        x.Loader.Equals(loader, StringComparison.OrdinalIgnoreCase));
+
+                    _required.Entries.Add(new RequiredMods.Entry
+                    {
+                        Minecraft = version, Loader = loader,
+                        ModId = need.Need.ModId,
+                        Name = best.Name.Length > 0 ? best.Name : need.Need.ModId,
+                        SourceName = "modrinth",
+                        Project = best.ProjectId, VersionId = best.Id,
+                        Sha1 = best.File.Sha1,
+                        Requires = need.Need.Predicate,
+                        Why = $"needed by {facts.Name ?? facts.Id}"
+                    });
+
+                    added++;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception) { failed.Add(need.Need.ModId); }
+            }
+
+            ReqList.ItemsSource = _required.Entries.ToList();
+
+            ReqStatus.Text = failed.Count == 0
+                ? $"Added it and {added} dependency/dependencies. Press SAVE to publish."
+                : $"Added it and {added} dependency/dependencies. Not on Modrinth for this " +
+                  $"version: {string.Join(", ", failed)} — those need adding as host-served jars.";
         }
 
         private async void ReqChangeSource_Click(object sender, RoutedEventArgs e)

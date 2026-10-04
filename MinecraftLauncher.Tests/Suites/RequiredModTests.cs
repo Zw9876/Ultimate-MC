@@ -29,6 +29,7 @@ namespace MinecraftLauncher.Tests
             Selecting();
             Fingerprinting();
             Detecting();
+            Upgrading();
             Declining();
         }
 
@@ -258,6 +259,75 @@ namespace MinecraftLauncher.Tests
             finally
             {
                 try { Directory.Delete(work, true); } catch { }
+            }
+        }
+
+        private static void Upgrading()
+        {
+            Section("an entry that demands a minimum version");
+
+            string dir = Path.Combine(Path.GetTempPath(), "mc-req-upgrade-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(dir);
+
+            try
+            {
+                string Jar(string name, string id, string version)
+                {
+                    string path = Path.Combine(dir, name);
+                    using var zip = System.IO.Compression.ZipFile.Open(
+                        path, System.IO.Compression.ZipArchiveMode.Create);
+                    var e = zip.CreateEntry("fabric.mod.json");
+                    using var w = new StreamWriter(e.Open());
+                    w.Write($"{{\"schemaVersion\":1,\"id\":\"{id}\",\"version\":\"{version}\"}}");
+                    return path;
+                }
+
+                // The real situation: fabric-api installed, but older than the portals
+                // mod needs.
+                Jar("fabric-api-0.152.1.jar", "fabric-api", "0.152.1+26.1.2");
+
+                var needsNewer = new RequiredMods.Entry
+                {
+                    Minecraft = Mc, Loader = "FABRIC", ModId = "fabric-api", Name = "Fabric API",
+                    SourceName = "modrinth", Project = "P7dR8mSH", VersionId = "3dM0X6ou",
+                    Requires = ">=0.154.2"
+                };
+
+                var missing = RequiredMods.MissingIn(new[] { needsNewer }, dir);
+                Expect("an installed but too-old mod still counts as missing", missing.Count, 1);
+                Check("so it gets offered as an upgrade", missing[0].ModId == "fabric-api");
+
+                // Without the predicate the same folder satisfies it — which is exactly
+                // the trap: "fabric-api? yes, got it" and then the game will not start.
+                var presenceOnly = needsNewer with { Requires = null };
+                Expect("presence alone would have passed it",
+                       RequiredMods.MissingIn(new[] { presenceOnly }, dir).Count, 0);
+
+                // And once it is new enough.
+                foreach (string f in Directory.GetFiles(dir)) File.Delete(f);
+                Jar("fabric-api-0.155.3.jar", "fabric-api", "0.155.3+26.1.2");
+
+                Expect("a new enough copy satisfies it",
+                       RequiredMods.MissingIn(new[] { needsNewer }, dir).Count, 0);
+
+                // A predicate nobody can parse must not nag forever about something
+                // unanswerable — the same rule the loader checks follow.
+                var nonsense = needsNewer with { Requires = "whenever-i-feel-like-it" };
+                Expect("an unparsable requirement says nothing rather than failing",
+                       RequiredMods.MissingIn(new[] { nonsense }, dir).Count, 0);
+
+                Check("the requirement shows in the admin list",
+                      needsNewer.Detail.Contains("needs >=0.154.2"), needsNewer.Detail);
+
+                // Changing the requirement is a different ask, so it must re-prompt.
+                var a = new RequiredMods.Listing { Entries = new() { needsNewer } };
+                var b = new RequiredMods.Listing { Entries = new() { needsNewer with { Requires = ">=0.155.0" } } };
+                Check("changing the minimum changes the fingerprint",
+                      a.Fingerprint(Mc, "FABRIC") != b.Fingerprint(Mc, "FABRIC"));
+            }
+            finally
+            {
+                try { Directory.Delete(dir, true); } catch { }
             }
         }
 
