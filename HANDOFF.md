@@ -769,10 +769,42 @@ Minecraft's own files (under `versions/` and `server.jar`) are **not**
 redistributable and are not in the GitHub repo — they come from the Setup tab /
 server download, or are copied in for offline machines.
 
-### Building the distributable zip
+### Building the zips
 
-The offline machines get a single zip that is extracted and run — no installer,
-no .NET, no Java, no internet. Build it in two steps:
+```powershell
+tools\Build-RolloutZip.ps1              # both
+tools\Build-RolloutZip.ps1 -UpdateOnly  # just the one that goes out
+```
+
+**Use the script rather than zipping a folder.** It builds from an explicit list of
+files and then checks what it staged against the host-only names below, refusing to
+write anything if one is present — this rule used to be enforced by remembering it,
+which is the kind that holds until the once it matters. It also hashes the launcher
+inside the finished zip against the one on disk, because a truncated 126 MB exe
+inside an archive is invisible until somebody runs it. Verified by sabotaging a copy
+of the script to stage `admin.flag`: it failed, exited 1 and wrote no zip.
+
+Two zips come out, into `C:\Users\Zach\` by default:
+
+| Zip | Goes to | Holds |
+|-----|---------|-------|
+| `Minecraft-Launcher-Update.zip` | **the host, and nobody else** — everything spreads from there | the exe, its 5 `*_cor3.dll` siblings, `README.txt` (from `UPDATE-README.txt`) and the two Defender helper scripts |
+| `Minecraft-Launcher-Admin.zip` | **nobody** | `admin.flag`, all of `tools\`, the docs, and this host's `required-mods.json` / `required-mods\` if it has any. `README.txt` comes from `ADMIN-README.txt` and explains each file and, as importantly, which generated files must never be copied anywhere |
+
+Both READMEs take `@VERSION@` and `@DATE@`, filled in from the exe's own version at
+build time, so neither can claim a build it is not.
+
+**Compression: `Optimal` for the update zip, measured.** 52.7 MB in 6.5 s against
+57.1 MB in 2.8 s for `Fastest` — 4.4 MB for under four seconds, worth it for a file
+that crosses a USB stick and gets scanned at the far end. The "compress at fastest"
+advice further down is about the **full from-scratch deployment zip**, which is 2.2
+GB of jars and DLLs that are already compressed; this one is a single exe that
+roughly halves.
+
+### Building the full from-scratch deployment zip
+
+For a machine that has nothing yet — no installer, no .NET, no Java, no internet.
+Not what `Build-RolloutZip.ps1` makes, and still done by hand:
 
 1. Publish self-contained (section 4).
 2. Zip the publish output **plus** `runtime/`, `servers/`, `skins/`,
@@ -808,6 +840,7 @@ and a zip built from a working folder will pick them up:
 | `crash-inbox\` | Other people's crash reports. |
 | `crash-sent.txt`, `required-mods-declined.txt` | Per-machine bookkeeping. Shipping one makes every machine think it has already sent its crashes, or already declined a mod. |
 | `backups\` | World zips. The one that matters is 70 MB, and the zip is meant to be 56. |
+| `config.txt`, `computer_uuid.dat` | Covered above too, and enforced by the same list in the build script. |
 | `launcher_errors.txt`, `update-watcher.log` | This machine's logs. |
 
 Without `versions/`, expect roughly 2.2 GB raw — almost entirely the bundled
@@ -846,14 +879,14 @@ committed here is world-readable the moment it is pushed.
 
 ## 10. Next tasks
 
-The port is complete and shipping. Current build at the repo root: **1.2.280.280**.
-**The rollout zip is still on 1.2.276.353 and has not been rebuilt** — see section 8
-for what it must and must not contain, which now matters more, because the host-only
-files this build creates beside the launcher (`admin.flag`, `fleet.json`,
-`crash-inbox\`, `backups\`) must none of them ship.
+The port is complete and shipping. Current build at the repo root and in the rollout
+zip: **1.2.280.291**, rebuilt 2026-10-08 by `tools\Build-RolloutZip.ps1` (56.3 MB,
+launcher verified byte-for-byte inside it). A second zip,
+`Minecraft-Launcher-Admin.zip`, holds the host-only side and **goes to nobody** —
+section 8.
 
 **This build has to reach the host by hand.** Updates are mandatory and
-self-installing (section 5), so once the host serves 1.2.280.280 every machine that
+self-installing (section 5), so once the host serves 1.2.280.291 every machine that
 already has the watcher installs it on its own within a couple of minutes of the host
 starting their server. Until the host has it, nothing else changes. Whether that
 makes it the *last* hand-copy depends on which build each machine is actually on,
@@ -870,13 +903,13 @@ once before the host can close it for them.
 
 What is genuinely outstanding:
 
-0. **Put 1.2.280.280 on the host.** Everything below matters less than this: it is
+0. **Put 1.2.280.291 on the host.** Everything below matters less than this: it is
    what turns rollout from a chore into something that happens by itself — and it is
    now also what makes the fleet visible instead of guessed at.
 
    **Be honest about what is actually out there, because it is not known.** The last
    build confirmed to have reached the machines is **1.2.265.376**. Everything since
-   — `.1389`, `1.2.266.182`, `.222`, `1.2.276.334`, `.353`, `1.2.280.280` — was
+   — `.1389`, `1.2.266.182`, `.222`, `1.2.276.334`, `.353`, `1.2.280.291` — was
    published here and
    **never confirmed deployed**: the rollout zip kept being eaten on download from
    Google Drive (section 15), and a USB stick was loaded but nothing was reported
@@ -884,7 +917,7 @@ What is genuinely outstanding:
 
    What this means for the hand-off:
    - **The watcher shipped in 1.2.265.373**, and the comparison is day-based, so
-     `280 > 265`. Any machine on 1.2.265.376 or later will pull 1.2.280.280 by
+     `280 > 265`. Any machine on 1.2.265.376 or later will pull 1.2.280.291 by
      itself once the host serves it.
    - **A machine older than 1.2.265.373 has no watcher** and needs one copy by hand.
      Its version is in the sidebar.
@@ -892,7 +925,7 @@ What is genuinely outstanding:
      failed. USB or a LAN copy carries no Mark of the Web and skips the
      download-time reputation check entirely — section 15 has the measurements.
 
-   **Once the host is on 1.2.280.280 this stops being guesswork.** The Admin tab's
+   **Once the host is on 1.2.280.291 this stops being guesswork.** The Admin tab's
    FLEET list shows every machine that has checked in, which build it runs and who
    last played on it (section 5), so "is the fleet current?" becomes something to look
    at rather than something to reason about. It needs the host serving before anything

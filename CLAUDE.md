@@ -11,9 +11,11 @@ The C# launcher (`MinecraftLauncher/`, .NET 10 WPF) is **complete and shipping**
 The whole PowerShell feature set is ported plus a good deal more;
 `MinecraftLauncher-Standalone.ps1` is now only a behavioural reference.
 
-**Current build: 1.2.280.280** (2026-10-07) at the repo root. **The rollout zip has
-not been rebuilt** and is still on 1.2.276.353. Updates are mandatory and
-self-installing, so in principle one copy onto the host carries the fleet.
+**Current build: 1.2.280.291** (2026-10-08), at the repo root and in the rollout zip
+(56.3 MB, launcher verified byte-for-byte inside it). Build both zips with
+`tools\Build-RolloutZip.ps1` rather than by hand — it refuses to write an update zip
+containing anything host-only. Updates are mandatory and self-installing, so in
+principle one copy onto the host carries the fleet.
 
 **Do not assume the fleet is current.** The last build *confirmed* to have reached
 the machines is 1.2.265.376; everything since was published here and never
@@ -21,7 +23,7 @@ confirmed deployed, because the zip kept being eaten on download. The unattended
 path itself is proven — 7/7, 18 seconds — so the open question is which build each
 machine is on, not whether the mechanism works. HANDOFF.md section 10 item 0.
 
-As of 1.2.280.280 this is answerable rather than arguable: the Admin tab's **FLEET**
+As of 1.2.280.291 this is answerable rather than arguable: the Admin tab's **FLEET**
 list shows every machine that has checked in, which build it runs and who last
 played on it. It only fills in once the host is serving.
 
