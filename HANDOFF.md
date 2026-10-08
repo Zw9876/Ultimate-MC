@@ -771,10 +771,12 @@ committed here is world-readable the moment it is pushed.
 The port is complete and shipping. Current build at the repo root and in the rollout
 zip: **1.2.276.353** (the zip is kept outside the repo — see section 8).
 
-**This build has to reach the host by hand once, and it is the last one that does.**
-Updates became mandatory and self-installing in it (section 5), so once the host is on
-1.2.276.353 every other machine installs it on its own within a couple of minutes of
-the host starting their server. Until the host has it, nothing else changes.
+**This build has to reach the host by hand.** Updates are mandatory and
+self-installing (section 5), so once the host serves 1.2.276.353 every machine that
+already has the watcher installs it on its own within a couple of minutes of the host
+starting their server. Until the host has it, nothing else changes. Whether that
+makes it the *last* hand-copy depends on which build each machine is actually on,
+which is not known — see item 0.
 
 **Cleared 2026-09-22.** The user ran both on the real machines and reported them
 working as intended: **"shut down for everyone" reaches watchers on other
