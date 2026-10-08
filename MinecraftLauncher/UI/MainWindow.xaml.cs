@@ -240,9 +240,9 @@ namespace MinecraftLauncher.UI
             SetupTypeCombo.ItemsSource = new[] { "Releases Only", "Snapshots Only", "All Versions" };
             SetupTypeCombo.SelectedIndex = 0;
 
-            // The required-mods tab exists only where admin.flag does, so on every other
+            // The Admin tab exists only where admin.flag does, so on every other
             // machine there is nothing in the sidebar to find.
-            NavRequired.Visibility = RequiredMods.AdminEnabled
+            NavAdmin.Visibility = RequiredMods.AdminEnabled
                 ? Visibility.Visible
                 : Visibility.Collapsed;
 
@@ -402,7 +402,7 @@ namespace MinecraftLauncher.UI
             ModsPanel.Visibility          = Visibility.Collapsed;
             SkinsPanel.Visibility         = Visibility.Collapsed;
             SetupPanel.Visibility         = Visibility.Collapsed;
-            RequiredPanel.Visibility      = Visibility.Collapsed;
+            AdminPanel.Visibility      = Visibility.Collapsed;
             panel.Visibility = Visibility.Visible;
         }
 
@@ -526,12 +526,46 @@ namespace MinecraftLauncher.UI
             finally { CheckRequiredButton.IsEnabled = true; }
         }
 
-        // ── Required mods (admin only) ──
+        // ── Admin tab (admin only) ──
 
-        private void NavRequired_Checked(object sender, RoutedEventArgs e)
+        private void NavAdmin_Checked(object sender, RoutedEventArgs e)
         {
-            ShowPanel(RequiredPanel);
-            RefreshRequired();
+            ShowPanel(AdminPanel);
+            RefreshAdminTab();
+        }
+
+        /// <summary>
+        /// Loads whichever sub-tab is showing.
+        /// </summary>
+        /// <remarks>
+        /// Per-tab rather than all three at once: the crash inbox parses every report it
+        /// holds, and doing that when somebody only wanted to edit the required list
+        /// would be work nobody asked for.
+        /// </remarks>
+        private void AdminTabs_Changed(object sender, SelectionChangedEventArgs e)
+        {
+            // SelectionChanged bubbles from every Selector underneath, so the lists
+            // inside these tabs raise it too — and RefreshInbox sets a selection, which
+            // would come straight back here. Only the TabControl's own event is wanted.
+            //
+            // Source, not OriginalSource: OriginalSource is the TabItem that was
+            // clicked, so comparing it to the TabControl rejects the very event this
+            // handler exists for. That mistake left all three panels blank while every
+            // offline check still passed.
+            if (e.Source is not TabControl) return;
+
+            e.Handled = true;
+            RefreshAdminTab();
+        }
+
+        private void RefreshAdminTab()
+        {
+            switch (AdminTabs?.SelectedIndex)
+            {
+                case 0: RefreshRequired(); break;
+                case 1: RefreshFleet();    break;
+                case 2: RefreshInbox();    break;
+            }
         }
 
         /// <summary>The list as it is being edited, saved only when SAVE is pressed.</summary>
@@ -944,6 +978,263 @@ namespace MinecraftLauncher.UI
             if (_manifest.Count == 0) await LoadManifestAsync(false);
         }
 
+        // ── Admin: the fleet ──
+
+        /// <summary>
+        /// Shows which machines have reported themselves, and what they are running.
+        /// </summary>
+        /// <remarks>
+        /// Read straight off disk every time. The roster is a few dozen lines of JSON
+        /// written by the skin server when a client checks in, and re-reading it is how
+        /// this panel and the server stay in agreement rather than drifting apart.
+        /// </remarks>
+        private void RefreshFleet()
+        {
+            if (FleetList is null) return;
+
+            var listing = FleetRoster.Load();
+            FleetList.ItemsSource = FleetRoster.Sorted(listing);
+
+            FleetSummary.Text = FleetRoster.Summarise(listing, LauncherPackage.CurrentVersion);
+
+            // The one thing that makes this list misleading if it is not said: a
+            // machine only reports itself when it can see this host, so an empty list
+            // on a machine that has never hosted means nothing at all.
+            string serving = _skinServer?.IsRunning == true
+                ? "This host is serving, so machines will check in as people use them."
+                : "Nothing is being served right now — start the skin server (or a server) " +
+                  "and machines will check in as people open their launchers and press PLAY.";
+
+            FleetNote.Text =
+                $"Each launcher tells this host its computer name, the build it is running and " +
+                $"the name it last played under. Kept in {FleetRoster.FilePath}. {serving}";
+
+            FleetForgetButton.IsEnabled = listing.Machines.Count > 0;
+        }
+
+        private void FleetRefresh_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshFleet();
+            FleetStatus.Text = $"Read at {DateTime.Now:HH:mm:ss}.";
+        }
+
+        private void FleetForget_Click(object sender, RoutedEventArgs e)
+        {
+            if (FleetList.SelectedItem is not FleetRoster.Machine chosen)
+            {
+                FleetStatus.Text = "Pick a computer in the list first.";
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                $"Forget {chosen.Name}?\n\nIt will come back on the list the next time that " +
+                "machine checks in, so this is only worth doing for a computer that has gone " +
+                "for good.",
+                "Forget computer", MessageBoxButton.YesNo, MessageBoxImage.Question,
+                MessageBoxResult.No);
+
+            if (answer != MessageBoxResult.Yes) return;
+
+            FleetStatus.Text = FleetRoster.Forget(chosen.Name)
+                ? $"Forgot {chosen.Name}."
+                : $"Could not forget {chosen.Name}.";
+
+            RefreshFleet();
+        }
+
+        // ── Admin: crash reports from other machines ──
+
+        private void RefreshInbox()
+        {
+            if (InboxList is null) return;
+
+            var arrived = CrashInbox.All();
+            InboxList.ItemsSource = arrived;
+
+            InboxNote.Text = arrived.Count == 0
+                ? "Nothing yet. A machine sends its crash reports here when its game closes " +
+                  "and this host is reachable, so these arrive on their own — there is nothing " +
+                  "for anybody to do on the other computer. " +
+                  $"Kept in {CrashInbox.Folder}."
+                : $"{arrived.Count} report{(arrived.Count == 1 ? "" : "s")} from other machines, " +
+                  $"newest first. Kept in {CrashInbox.Folder}, oldest dropped past {CrashInbox.Keep}.";
+
+            bool any = arrived.Count > 0;
+            InboxCopyButton.IsEnabled = any;
+            InboxDeleteButton.IsEnabled = any;
+
+            if (!any)
+            {
+                InboxExplain.Text = "Nothing to show.";
+                InboxText.Text = "";
+            }
+            else
+            {
+                InboxList.SelectedIndex = 0;
+            }
+        }
+
+        private void InboxList_Changed(object sender, SelectionChangedEventArgs e)
+        {
+            if (InboxList.SelectedItem is not CrashInbox.Arrived chosen)
+            {
+                InboxExplain.Text = "Pick a crash on the left.";
+                InboxText.Text = "";
+                return;
+            }
+
+            // Explain() is the same plain-English summary the Client tab's viewer shows;
+            // a report that arrived from elsewhere is read no differently.
+            InboxExplain.Text = chosen.Report is null
+                ? $"This report came from {chosen.Who} but could not be read as a crash report."
+                : $"From {chosen.Who}, {chosen.WhenText}\n\n{chosen.Report.Explain()}";
+
+            try { InboxText.Text = File.ReadAllText(chosen.TextPath); }
+            catch (Exception ex) { InboxText.Text = $"Could not read the file: {ex.Message}"; }
+        }
+
+        private void InboxRefresh_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshInbox();
+            InboxStatus.Text = $"Read at {DateTime.Now:HH:mm:ss}.";
+        }
+
+        private void InboxCopy_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(InboxText.Text)) return;
+
+            try
+            {
+                Clipboard.SetText(InboxText.Text);
+                InboxStatus.Text = "Copied the whole report.";
+            }
+            catch (Exception ex)
+            {
+                InboxStatus.Text = $"Could not copy it: {ex.Message}";
+            }
+        }
+
+        private void InboxFolder_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                Directory.CreateDirectory(CrashInbox.Folder);
+                Process.Start(new ProcessStartInfo("explorer.exe", CrashInbox.Folder));
+            }
+            catch (Exception ex)
+            {
+                InboxStatus.Text = $"Could not open the folder: {ex.Message}";
+            }
+        }
+
+        private void InboxDelete_Click(object sender, RoutedEventArgs e)
+        {
+            if (InboxList.SelectedItem is not CrashInbox.Arrived chosen)
+            {
+                InboxStatus.Text = "Pick a report first.";
+                return;
+            }
+
+            InboxStatus.Text = CrashInbox.Remove(chosen)
+                ? $"Deleted the report from {chosen.Who}."
+                : "Could not delete it.";
+
+            RefreshInbox();
+        }
+
+        // ── Backing up worlds ──
+
+        /// <summary>
+        /// The single-player worlds for the version selected on the Client tab.
+        /// </summary>
+        private void BackupClientWorlds_Click(object sender, RoutedEventArgs e)
+        {
+            if (VersionCombo.SelectedItem is not string version)
+            {
+                ClientStatus.Text = "Pick a version first.";
+                return;
+            }
+
+            var targets = WorldBackups.ClientTargets(version);
+
+            string intro = targets.Count == 0
+                ? $"There are no single-player worlds in Minecraft {version} on this computer. " +
+                  "Worlds you create in-game will show up here."
+                : $"Single-player worlds for Minecraft {version}. Each backup is a zip in " +
+                  $"{WorldBackups.Folder}, and the last {WorldBackups.DefaultKeep} of each world are kept.";
+
+            new BackupWindow(intro, targets) { Owner = this }.ShowDialog();
+        }
+
+        /// <summary>
+        /// The server's own world, backed up safely even while it is running.
+        /// </summary>
+        /// <remarks>
+        /// When a server is up, the backup is wrapped in <c>save-off</c> /
+        /// <c>save-all flush</c> and <c>save-on</c>. This is the part that makes a
+        /// backup of a live world worth having: without it the copy still succeeds — a
+        /// region file can simply be caught halfway through a write — and the damage is
+        /// invisible until somebody loads the world.
+        ///
+        /// Which server is used follows the tab: the running one when there is one,
+        /// otherwise whatever the Server tab has selected, so a backup taken before
+        /// starting goes to the world that is about to be started.
+        /// </remarks>
+        private void BackupServerWorlds_Click(object sender, RoutedEventArgs e)
+        {
+            string? version = SvVersionCombo.SelectedItem as string;
+            string loader = SvTypeCombo.SelectedItem as string ?? "Vanilla";
+
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                ServerStatus.Text = "Pick a server version first.";
+                return;
+            }
+
+            var targets = WorldBackups.ServerTargets(loader, version);
+            bool running = _serverSession?.IsRunning == true;
+
+            string intro = targets.Count == 0
+                ? $"The {loader} {version} server has no world yet — it is created the first " +
+                  "time the server starts."
+                : running
+                    ? "The server is running, so it will be asked to save everything and hold " +
+                      "its writes while the copy is made, then carry on. Nobody is kicked and " +
+                      "the world is not unloaded."
+                    : $"The {loader} {version} server is not running, so this is a clean copy. " +
+                      "This is the right moment to take one — especially before pre-generating.";
+
+            intro += $"\n\nBackups are zips in {WorldBackups.Folder}; the last " +
+                     $"{WorldBackups.DefaultKeep} of each world are kept.";
+
+            Func<Task>? hold = null, release = null;
+
+            if (running && targets.Count > 0)
+            {
+                var session = _serverSession!;
+
+                hold = async () =>
+                {
+                    session.SendCommand("save-off");
+                    session.SendCommand("save-all flush");
+
+                    // The flush is not acknowledged in a way worth parsing, and the
+                    // alternative — watching the console for "Saved the game" — would
+                    // tie a backup to a log line that changes between versions. Three
+                    // seconds is comfortably longer than flushing the worlds here takes.
+                    await Task.Delay(TimeSpan.FromSeconds(3));
+                };
+
+                release = () =>
+                {
+                    session.SendCommand("save-on");
+                    return Task.CompletedTask;
+                };
+            }
+
+            new BackupWindow(intro, targets, hold, release) { Owner = this }.ShowDialog();
+        }
+
         // ── Client tab ──
         private void VersionCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -1073,7 +1364,7 @@ namespace MinecraftLauncher.UI
 
                 // Something has to stay behind to close this game when the host ends
                 // the session, because the launcher itself is about to close.
-                GameWatcher.Spawn(launched.Game.Id, launched.SkinServerAddress);
+                GameWatcher.Spawn(launched.Game.Id, launched.SkinServerAddress, version, loader);
 
                 // The game is a separate process, so the launcher closes and gets
                 // out of the way — matching the PowerShell version.
@@ -2629,6 +2920,23 @@ namespace MinecraftLauncher.UI
                     _skinServer = new SkinServer();
                     _skinServer.Log += message =>
                         Dispatcher.BeginInvoke(() => SkinServerDetail.Text = message);
+
+                    // Both fire on a background thread, and both only matter when the
+                    // Admin tab is actually open — so the panel is refreshed where it
+                    // is visible rather than kept warm in the background.
+                    _skinServer.CheckedIn += () =>
+                        Dispatcher.BeginInvoke(() =>
+                        {
+                            if (AdminPanel.Visibility == Visibility.Visible &&
+                                AdminTabs.SelectedIndex == 1) RefreshFleet();
+                        });
+
+                    _skinServer.CrashArrived += () =>
+                        Dispatcher.BeginInvoke(() =>
+                        {
+                            if (AdminPanel.Visibility == Visibility.Visible &&
+                                AdminTabs.SelectedIndex == 2) RefreshInbox();
+                        });
                 }
                 _skinServer.Start();
                 _skinServerForHosting = forHosting;
@@ -2698,7 +3006,20 @@ namespace MinecraftLauncher.UI
             {
                 // Hashing a 126 MB exe is real work, and the discovery probe blocks —
                 // neither belongs on the UI thread.
-                var check = await Task.Run(() => LauncherUpdate.CheckLanAsync(_config));
+                //
+                // LookupAsync rather than CheckLanAsync: the latter answers null unless
+                // there is an update, and the host's address is wanted either way so
+                // this machine can report itself.
+                var lookup = await Task.Run(() => LauncherUpdate.LookupAsync(_config));
+
+                // Report this machine to whoever is hosting, reusing the address the
+                // lookup just found rather than discovering again — a second UDP probe
+                // costs another 1500 ms for an answer already in hand. Nothing waits on
+                // this and nothing is shown if it fails.
+                if (lookup.HostAddress is { Length: > 0 } host)
+                    _ = FleetClient.CheckInAsync(_config, host, null, null, playing: false);
+
+                var check = lookup.Check;
                 if (check?.UpdateAvailable != true) return;
 
                 _pendingUpdate = check;

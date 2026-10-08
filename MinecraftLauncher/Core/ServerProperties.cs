@@ -82,8 +82,10 @@ namespace MinecraftLauncher.Core
             // busy" and "the server stopped for a moment".
             //
             // The trade is that a hard power cut can leave a recently written chunk
-            // corrupt. Worth it here: worlds are started fresh, nothing is backed up,
-            // and the launcher's Stop saves the world before exiting anyway.
+            // corrupt. Worth it here: the launcher's Stop saves the world before
+            // exiting, and the worlds can now be backed up from the Server tab
+            // (<see cref="WorldBackups"/>) — which is the real answer to this risk,
+            // and what the comment used to say was missing.
             Set(lines, "sync-chunk-writes", "false");
 
             // Owned rather than seeded, deliberately. As first-run defaults these only

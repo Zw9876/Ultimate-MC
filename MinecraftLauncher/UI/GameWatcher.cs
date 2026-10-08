@@ -27,6 +27,17 @@ namespace MinecraftLauncher.UI
         public const string Flag = "--watch-game";
         private const string HostFlag = "--host";
 
+        /// <summary>
+        /// What is being played, passed through so the watcher can tell the host.
+        /// </summary>
+        /// <remarks>
+        /// Handed over rather than worked out here. The launcher has just resolved all
+        /// of it, and a watcher that went looking again would pay the 1500 ms discovery
+        /// probe a third time in one launch.
+        /// </remarks>
+        private const string McFlag = "--mc";
+        private const string LoaderFlag = "--loader";
+
         private static readonly TimeSpan PollInterval        = TimeSpan.FromSeconds(1);
         private static readonly TimeSpan UnreachableInterval = TimeSpan.FromSeconds(3);
         private static readonly TimeSpan UnsupportedInterval = TimeSpan.FromSeconds(30);
@@ -41,38 +52,57 @@ namespace MinecraftLauncher.UI
         private readonly Application _app;
         private readonly Process _game;
         private string? _host;
+        private readonly string? _minecraft;
+        private readonly string? _loader;
         private readonly HashSet<string> _handled = new();
         private bool _busy;
+        private bool _reported;
 
-        private GameWatcher(Application app, Process game, string? host)
+        private GameWatcher(
+            Application app, Process game, string? host, string? minecraft, string? loader)
         {
             _app = app;
             _game = game;
             _host = host;
+            _minecraft = minecraft;
+            _loader = loader;
         }
 
         /// <summary>Recognises the command line a watcher is started with.</summary>
-        public static bool TryParse(string[] args, out int gamePid, out string? host)
+        public static bool TryParse(
+            string[] args, out int gamePid, out string? host,
+            out string? minecraft, out string? loader)
         {
             gamePid = 0;
             host = null;
+            minecraft = null;
+            loader = null;
 
             int at = Array.IndexOf(args, Flag);
             if (at < 0 || at + 1 >= args.Length || !int.TryParse(args[at + 1], out gamePid))
                 return false;
 
-            int h = Array.IndexOf(args, HostFlag);
-            if (h >= 0 && h + 1 < args.Length && !string.IsNullOrWhiteSpace(args[h + 1]))
-                host = args[h + 1];
+            host      = Value(args, HostFlag);
+            minecraft = Value(args, McFlag);
+            loader    = Value(args, LoaderFlag);
 
             return true;
+        }
+
+        private static string? Value(string[] args, string flag)
+        {
+            int at = Array.IndexOf(args, flag);
+            return at >= 0 && at + 1 < args.Length && !string.IsNullOrWhiteSpace(args[at + 1])
+                ? args[at + 1]
+                : null;
         }
 
         /// <summary>
         /// Starts a watcher for a game this launcher has just started. Never throws —
         /// failing to start one must not get in the way of playing.
         /// </summary>
-        public static void Spawn(int gamePid, string? host)
+        public static void Spawn(
+            int gamePid, string? host, string? minecraft = null, string? loader = null)
         {
             try
             {
@@ -82,11 +112,10 @@ namespace MinecraftLauncher.UI
                 var psi = new ProcessStartInfo(exe) { UseShellExecute = false };
                 psi.ArgumentList.Add(Flag);
                 psi.ArgumentList.Add(gamePid.ToString());
-                if (!string.IsNullOrWhiteSpace(host))
-                {
-                    psi.ArgumentList.Add(HostFlag);
-                    psi.ArgumentList.Add(host);
-                }
+
+                Add(psi, HostFlag, host);
+                Add(psi, McFlag, minecraft);
+                Add(psi, LoaderFlag, loader);
 
                 Process.Start(psi);
             }
@@ -96,8 +125,16 @@ namespace MinecraftLauncher.UI
             }
         }
 
+        private static void Add(ProcessStartInfo psi, string flag, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            psi.ArgumentList.Add(flag);
+            psi.ArgumentList.Add(value);
+        }
+
         /// <summary>Entry point for watcher mode.</summary>
-        public static void Run(Application app, int gamePid, string? host)
+        public static void Run(
+            Application app, int gamePid, string? host, string? minecraft, string? loader)
         {
             Process game;
             try
@@ -110,7 +147,7 @@ namespace MinecraftLauncher.UI
                 return;
             }
 
-            new GameWatcher(app, game, host).Loop();
+            new GameWatcher(app, game, host, minecraft, loader).Loop();
         }
 
         private async void Loop()
@@ -126,6 +163,16 @@ namespace MinecraftLauncher.UI
                     if (GameHasExited() || exitSignal.WaitOne(0)) break;
 
                     TimeSpan wait = PollInterval;
+
+                    // Tell the host who is playing, once, as soon as there is a host to
+                    // tell. Done from here rather than from the launcher because the
+                    // launcher closes on PLAY, and because this is where the host's
+                    // address is already known.
+                    if (!_reported && _host is not null)
+                    {
+                        _reported = true;
+                        await ReportSessionAsync();
+                    }
 
                     if (_busy)
                     {
@@ -174,7 +221,59 @@ namespace MinecraftLauncher.UI
                 App.Log(ex);
             }
 
+            // The game has gone. If it crashed, the report is on disk now — this is the
+            // only moment anything is still running on this machine to hand it over,
+            // and it happens without anybody being asked to do a thing.
+            await HandOverCrashesAsync();
+
             _app.Shutdown();
+        }
+
+        /// <summary>
+        /// Tells the host this machine is playing, and what it is playing.
+        /// </summary>
+        private async Task ReportSessionAsync()
+        {
+            try
+            {
+                await FleetClient.CheckInAsync(
+                    AppConfig.Load(), _host, _minecraft, _loader, playing: true);
+            }
+            catch (Exception ex)
+            {
+                App.Log(ex);
+            }
+        }
+
+        /// <summary>
+        /// Sends any crash reports this machine has not sent yet.
+        /// </summary>
+        /// <remarks>
+        /// Runs after the game has exited, whether it crashed or was closed normally:
+        /// a report from an earlier crash that could not be delivered then — because
+        /// the host was off — goes now. A report is only marked as sent once the host
+        /// confirms it, so nothing is lost if this machine is the one that gets turned
+        /// off first.
+        ///
+        /// The version has to be known, because that is where the reports live: the
+        /// client's game directory is its version folder. An older launcher that spawned
+        /// this watcher without <c>--mc</c> simply skips it.
+        /// </remarks>
+        private async Task HandOverCrashesAsync()
+        {
+            if (_host is null || string.IsNullOrWhiteSpace(_minecraft)) return;
+
+            try
+            {
+                // Not logged on success: launcher_errors.txt is for faults, and a line
+                // in there saying a feature worked is how a working feature comes to
+                // look broken. The host records what it received in its own log.
+                await FleetClient.SendUnsentCrashesAsync(_host, AppConfig.Load(), _minecraft!);
+            }
+            catch (Exception ex)
+            {
+                App.Log(ex);
+            }
         }
 
         private bool GameHasExited()

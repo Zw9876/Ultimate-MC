@@ -11,15 +11,19 @@ The C# launcher (`MinecraftLauncher/`, .NET 10 WPF) is **complete and shipping**
 The whole PowerShell feature set is ported plus a good deal more;
 `MinecraftLauncher-Standalone.ps1` is now only a behavioural reference.
 
-**Current build: 1.2.276.353** (2026-10-04), at the repo root and in the rollout
-zip kept outside the repo (56.2 MB, verified byte-for-byte). Updates are mandatory
-and self-installing, so in principle one copy onto the host carries the fleet.
+**Current build: 1.2.280.280** (2026-10-07) at the repo root. **The rollout zip has
+not been rebuilt** and is still on 1.2.276.353. Updates are mandatory and
+self-installing, so in principle one copy onto the host carries the fleet.
 
 **Do not assume the fleet is current.** The last build *confirmed* to have reached
 the machines is 1.2.265.376; everything since was published here and never
 confirmed deployed, because the zip kept being eaten on download. The unattended
 path itself is proven — 7/7, 18 seconds — so the open question is which build each
 machine is on, not whether the mechanism works. HANDOFF.md section 10 item 0.
+
+As of 1.2.280.280 this is answerable rather than arguable: the Admin tab's **FLEET**
+list shows every machine that has checked in, which build it runs and who last
+played on it. It only fills in once the host is serving.
 
 Shipping and verified on the real machines: Client / Server / Mods / Skins / Setup;
 Vanilla, Fabric, Forge and NeoForge; the LAN skin server and 3D skin preview; the
@@ -31,13 +35,22 @@ section 5 — read it there rather than expecting a summary here.
 
 Built and tested here but **never run on the real machines**: the crash report
 viewer, mod update checking against Modrinth, "Delete disabled", Fabric loader
-packs for servers, and required mods. They are covered by tests and by driving the
-real UI; they have not met twenty machines and a Friday evening. Also section 5.
+packs for servers, required mods, and — new on 2026-10-07 — world backups, the
+fleet list and crash reports reaching the host. They are covered by tests and by
+driving the real UI; they have not met twenty machines and a Friday evening. Also
+section 5.
+
+The Admin tab is the former hidden REQUIRED tab, now holding three sub-tabs
+(required mods, fleet, crash reports) and still gated on nothing but `admin.flag`
+sitting beside the launcher. **Never ship that file** — section 8 has the full list
+of host-only files the rollout zip must leave out.
 
 Two things are worth carrying in your head because they shape decisions:
 
 - **The worlds are still not pre-generated.** Hardware is not the limit — the hosts
-  are high-clock 8-core workstation parts. This is the real remaining cause of host
+  are high-clock 8-core workstation parts. There is now a backup of the real
+  `fabric-26.1.2` world in `backups\` (69.8 MB, taken 2026-10-07), which is worth
+  having before Chunky rewrites every region file. This is the real remaining cause of host
   lag, and the plan is HANDOFF.md section 14.
 - **Discovery preferring a *remote* skin server over a local one is not yet proven.**
   It cannot be exercised on one machine, and skins working for everyone is
@@ -105,8 +118,8 @@ beside the exe and finds nothing.
   compiled fine and failed at run time — a wrong Java version, a silently
   misdirected installer, a profile the scanner could not see. Launch it, drive the
   UI, read the server output.
-- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 471 offline checks in about 4
-  seconds, exit code 0 when clean; around 550 with the network suite, which moves
+- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 617 offline checks in about 4
+  seconds, exit code 0 when clean; around 700 with the network suite, which moves
   with the live Modrinth API. `-Offline` skips the network suite. Piped
   anywhere it prints only failures and the count — `-ShowAll` for a line per check.
   Add to `MinecraftLauncher.Tests/Suites/` as work lands — and write the checks against
@@ -119,6 +132,10 @@ beside the exe and finds nothing.
 - **Run `tools\Verify-Publish.ps1` after every publish.** A framework-dependent build
   at the repo root looks perfectly normal and silently refuses to serve updates; this
   is the only thing that catches it before rollout day. `tools\Verify-AutoUpdate.ps1`
-  covers the unattended update path when that changes. See HANDOFF.md section 13.
+  covers the unattended update path when that changes, `tools\Verify-Admin.ps1` the
+  Admin tab and the two host endpoints, and `tools\Verify-Backups.ps1` the backup
+  buttons. See HANDOFF.md section 13 — and read `launcher_errors.txt` before
+  concluding a panel "did not render", because a binding error behind an invisible
+  MessageBox looks exactly like one.
 - **Keep HANDOFF.md updated** as work lands — sections 5, 10, 11 and 13. Update it
   there, not here.

@@ -12,7 +12,8 @@ namespace MinecraftLauncher.UI
         {
             // Watcher mode: a hidden copy started at PLAY to close the game when the
             // host ends the session. No launcher window, and it exits with its game.
-            if (GameWatcher.TryParse(e.Args, out int gamePid, out string? host))
+            if (GameWatcher.TryParse(e.Args, out int gamePid, out string? host,
+                                      out string? mc, out string? loader))
             {
                 // Never an error dialog in the middle of someone's game, and never a
                 // watcher left hanging around holding the exe open: log it and go.
@@ -25,7 +26,7 @@ namespace MinecraftLauncher.UI
 
                 ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 base.OnStartup(e);
-                GameWatcher.Run(this, gamePid, host);
+                GameWatcher.Run(this, gamePid, host, mc, loader);
                 return;
             }
 

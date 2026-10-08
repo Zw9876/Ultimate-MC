@@ -37,11 +37,28 @@ version_manifest_v2.json
 *.exe.WebView2/
 .mixin.out/
 
+# ── Host-only state, created beside the launcher as the host uses it ──
+# None of this belongs in the repo, and none of it belongs in the rollout zip
+# either — section 8 of HANDOFF.md says why for each one. admin.flag is the whole
+# of the gate on the Admin tab, so a copy in the repo would be one `git pull` away
+# from handing every machine the required-mods editor and everyone else's crashes.
+admin.flag
+fleet.json
+required-mods.json
+required-mods/
+crash-inbox/
+crash-sent.txt
+required-mods-declined.txt
+
+# World backups. One zip of the real overworld is ~70 MB.
+backups/
+
 # ── Logs / temp ──
 **/logs/
 **/crash-reports/
 *.log
 *.tmp
 Thumbs.db
+launcher_errors.txt
 # Written by tools\Why-was-this-blocked.cmd on whichever machine it is run.
 antivirus-report.txt

@@ -338,6 +338,70 @@ including where WebView2 is loaded from — depends on it.
     server, so about 1.5 s more before the game starts on a machine with no host. See
     section 10.
 
+- **World backups** — a dated zip of a world, from the Client tab for single-player
+  saves and from the Server tab for a server's own. `Core/WorldBackups.cs`,
+  `UI/BackupWindow.xaml`. Added 2026-10-07, because until then **nothing in this
+  project backed anything up** and the worlds are the only part of the install that
+  cannot be rebuilt from a download. Keeps the last 5 per world and names them
+  `<owner>-<world>-<date>-<time>.zip`, so two worlds both called `world` cannot
+  overwrite each other.
+  - **Safe on a running server.** When a server is up the copy is wrapped in
+    `save-off` / `save-all flush` … `save-on`. This is the part that makes a live
+    backup worth having: without it the copy still *succeeds* — a region file can
+    simply be caught halfway through a write — and the damage is invisible until
+    somebody loads the world. The server is always released again, including after a
+    failure, because a server left with saving off would lose the whole evening.
+  - **Every file is opened shared and `session.lock` is skipped.**
+    `ZipFile.CreateEntryFromFile` opens its source exclusively and **throws** on a
+    region file that Minecraft holds open — measured here, not assumed — so entries are
+    created and filled by hand with `FileShare.ReadWrite`. The lock file is excluded by
+    name: the game rewrites it on load, and restoring a stale one is how "someone else
+    is playing in this world" appears out of nowhere.
+  - **Free space is checked against the *uncompressed* size.** Deliberately
+    pessimistic, and justified by measurement: the real 110 MB overworld compresses to
+    **69.8 MB**, about 36%, not the half one would assume. On a machine with a few
+    gigabytes free that difference matters.
+  - **Measured:** the real `fabric-26.1.2` world — 110 MB, 297 files — zips in **3
+    seconds**. Pruning deletes permanently rather than to the Recycle Bin, since the
+    whole point is getting the space back.
+
+- **The fleet list** (Admin tab) — which machines exist, which build each one runs,
+  and **the name the person last played under**. `Core/FleetRoster.cs`,
+  `Core/FleetClient.cs`, `POST /launcher/checkin`. Added 2026-10-07 to end a specific
+  recurring failure: five builds in a row went out with "published here, never
+  confirmed deployed" beside them and every handoff had to admit the fleet state was
+  simply unknown. That is not a deployment problem but a visibility one.
+  - Machines are keyed by **computer name**, the one identifier that does not move.
+    The username is carried anyway because the question actually asked in the room is
+    "whose machine is that?", and `DESKTOP-7F3K2A1` does not answer it.
+  - Reported by the launcher at startup (reusing the host address the update check
+    already resolved — a second UDP probe would cost another 1500 ms for an answer
+    already in hand) and by the **game watcher** when a game starts, since the launcher
+    itself closes on PLAY.
+  - **A field is only overwritten when the new report carries it**, and `played` moves
+    only for a real launch. Otherwise opening the launcher in the morning would blank
+    what last night's session recorded, and the column showing who is on tonight would
+    be wrong.
+  - A machine on a *newer* build is not counted as behind, and one that did not report
+    a version is not either — unknown is not the same as old. A machine that never
+    checks in is simply absent, not flagged: it may be switched off, and a list that
+    cried wolf about every powered-down computer would be ignored within a week.
+
+- **Crash reports reaching the host** (Admin tab) — clients hand their crash reports
+  over so the person who fixes them does not have to walk to each machine.
+  `Core/CrashInbox.cs`, `POST /launcher/crash`. The **game watcher** sends them after
+  the game exits, whether it crashed or not, so an older report that could not be
+  delivered when the host was off goes next time. Nobody has to do anything on the
+  other computer.
+  - Stored as the crash text **byte-for-byte** plus a small JSON sidecar naming the
+    sender, so it parses here exactly as it does there and anything pasted into a mod's
+    issue tracker is the real thing. A header stuffed into the file would have broken
+    both.
+  - Treated as untrusted input: the file name is generated on the host and never taken
+    from the sender, the body is capped at 1 MB, duplicates are dropped by content
+    hash, and the oldest are pruned past 60. A report is marked sent only once the host
+    confirms it.
+
 - **"Delete disabled" on the Mods tab** — clears out every `.jar.disabled` in the
   folder. Switching a version between loaders a few times fills it with turned-off
   jars until the list stops being readable, which is the whole reason it exists.
@@ -732,6 +796,20 @@ omitted so each machine prompts for its own username. Both regenerate on first
 run. Source, `.pdb` files, the PowerShell launcher and dev docs do not belong in
 it either.
 
+**Also leave out everything that is the host's own, and check it every time.** These
+are created beside the launcher as the host uses it, so they accumulate quietly
+and a zip built from a working folder will pick them up:
+
+| Must not ship | Why |
+|---------------|-----|
+| `admin.flag` | It is the *only* thing gating the Admin tab. Ship it and all twenty machines get the required-mods editor, the fleet list and the crash inbox. |
+| `required-mods.json`, `required-mods\` | The host's list and the jars it serves. A client with its own copy would check itself against a stale list instead of asking the host. |
+| `fleet.json` | The host's record of every machine, usernames included. Pointless on a client and not theirs to carry. |
+| `crash-inbox\` | Other people's crash reports. |
+| `crash-sent.txt`, `required-mods-declined.txt` | Per-machine bookkeeping. Shipping one makes every machine think it has already sent its crashes, or already declined a mod. |
+| `backups\` | World zips. The one that matters is 70 MB, and the zip is meant to be 56. |
+| `launcher_errors.txt`, `update-watcher.log` | This machine's logs. |
+
 Without `versions/`, expect roughly 2.2 GB raw — almost entirely the bundled
 Java and WebView2 runtimes. Compress at *fastest*; the payload is mostly jars and
 DLLs where higher settings cost minutes and save little.
@@ -768,11 +846,14 @@ committed here is world-readable the moment it is pushed.
 
 ## 10. Next tasks
 
-The port is complete and shipping. Current build at the repo root and in the rollout
-zip: **1.2.276.353** (the zip is kept outside the repo — see section 8).
+The port is complete and shipping. Current build at the repo root: **1.2.280.280**.
+**The rollout zip is still on 1.2.276.353 and has not been rebuilt** — see section 8
+for what it must and must not contain, which now matters more, because the host-only
+files this build creates beside the launcher (`admin.flag`, `fleet.json`,
+`crash-inbox\`, `backups\`) must none of them ship.
 
 **This build has to reach the host by hand.** Updates are mandatory and
-self-installing (section 5), so once the host serves 1.2.276.353 every machine that
+self-installing (section 5), so once the host serves 1.2.280.280 every machine that
 already has the watcher installs it on its own within a couple of minutes of the host
 starting their server. Until the host has it, nothing else changes. Whether that
 makes it the *last* hand-copy depends on which build each machine is actually on,
@@ -789,25 +870,33 @@ once before the host can close it for them.
 
 What is genuinely outstanding:
 
-0. **Put 1.2.276.353 on the host.** Everything below matters less than this: it is
-   what turns rollout from a chore into something that happens by itself.
+0. **Put 1.2.280.280 on the host.** Everything below matters less than this: it is
+   what turns rollout from a chore into something that happens by itself — and it is
+   now also what makes the fleet visible instead of guessed at.
 
    **Be honest about what is actually out there, because it is not known.** The last
    build confirmed to have reached the machines is **1.2.265.376**. Everything since
-   — `.1389`, `1.2.266.182`, `.222`, `1.2.276.334`, `.353` — was published here and
+   — `.1389`, `1.2.266.182`, `.222`, `1.2.276.334`, `.353`, `1.2.280.280` — was
+   published here and
    **never confirmed deployed**: the rollout zip kept being eaten on download from
    Google Drive (section 15), and a USB stick was loaded but nothing was reported
    back. So do not assume the fleet is current.
 
    What this means for the hand-off:
    - **The watcher shipped in 1.2.265.373**, and the comparison is day-based, so
-     `276 > 265`. Any machine on 1.2.265.376 or later will pull 1.2.276.353 by
+     `280 > 265`. Any machine on 1.2.265.376 or later will pull 1.2.280.280 by
      itself once the host serves it.
    - **A machine older than 1.2.265.373 has no watcher** and needs one copy by hand.
      Its version is in the sidebar.
    - **Do not download the zip to get it there.** That is the one step that has ever
      failed. USB or a LAN copy carries no Mark of the Web and skips the
      download-time reputation check entirely — section 15 has the measurements.
+
+   **Once the host is on 1.2.280.280 this stops being guesswork.** The Admin tab's
+   FLEET list shows every machine that has checked in, which build it runs and who
+   last played on it (section 5), so "is the fleet current?" becomes something to look
+   at rather than something to reason about. It needs the host serving before anything
+   appears.
 
    **The unattended path itself is proven on this code**, not just reasoned about:
    `tools\Verify-AutoUpdate.ps1` ran 7/7 on 2026-10-04 against two real installs,
@@ -1275,6 +1364,35 @@ Do not "restore fidelity" on these — the PowerShell behavior was wrong.
   `Unchecked` fire however the value changed, and are the right handlers for
   "recompute when this setting changes".
 
+- **A retemplated `TabControl` needs its content host named
+  `PART_SelectedContentHost`.** Added for the Admin tab's sub-tabs on 2026-10-07.
+  `ContentSource="SelectedContent"` on the `ContentPresenter` is *not* sufficient:
+  without the name, the tab headers render perfectly and the panel beneath them stays
+  completely empty. Every one of the 617 offline checks still passed, because none of
+  this is `Core`. Found by dumping the UI Automation tree and seeing `TabItem`
+  elements with no children — guessing at it had already cost two rebuilds.
+
+- **`Run.Text` binds TwoWay by default.** Binding it to a read-only computed property
+  throws `InvalidOperationException: A TwoWay or OneWayToSource binding cannot work on
+  the read-only property` *while the template renders*, which surfaces as the whole
+  panel failing to appear. `TextBlock.Text` does not do this; `Run.Text` does. Use
+  `Mode=OneWay` on every `<Run Text="{Binding ...}"/>`. Cost here: the crash-inbox
+  list template, bound to `WhenText` and `VersionText`.
+
+  Both of the above were invisible for the same reason, which is the real lesson:
+  the exception raised a MessageBox, and **UI Automation cannot see a MessageBox**
+  (section 13). The verification script read on past it and reported empty labels.
+  `launcher_errors.txt` had the answer the whole time — read it first.
+
+- **Non-ASCII characters in a `.ps1` file are a parse hazard under Windows
+  PowerShell 5.1.** It reads a BOM-less file using the ANSI code page, so a UTF-8
+  em-dash arrives as three characters, one of which is a quote — silently opening an
+  unterminated string and failing the whole script at its last line. The reported
+  error points nowhere near the cause. The repo's scripts are therefore ASCII; when
+  one will not parse, bisect it with
+  `[System.Management.Automation.Language.Parser]::ParseInput` over a growing prefix
+  rather than reading it. Box-drawing comment rules belong in C#, not in `tools\`.
+
 Deliberately kept: `--uuid` is machine-based, not username-based, so renaming
 yourself preserves your local player data. This is *not* impersonation protection —
 offline servers compute a joining player's UUID from the username and ignore what
@@ -1354,7 +1472,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **471 offline checks in about 4 seconds**, and around 550 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
+`MinecraftLauncher.Tests/` — **617 offline checks in about 4 seconds**, and around 700 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
 
 ```powershell
 tools\run-tests.ps1                 # everything
@@ -1366,8 +1484,9 @@ tools\run-tests.ps1 -Quiet          # failures and the summary only
 ```
 
 Suites: `versions`, `mods`, `chunky`, `players`, `loader`, `replace`, `enforce`,
-`packs`, `modrinth` (the last needs internet). Exit code is 0 only when everything
-passed.
+`swap`, `crashes`, `cleanup`, `required`, `deps`, `backups`, `fleet`, `packs`,
+`serverpacks`, `modrinth` (the last needs internet). Exit code is 0 only when
+everything passed.
 
 **How much it prints depends on who is reading.** In a terminal it prints a line per
 check, as it always did. Piped into a file, a log or a tool that captures output it
@@ -1388,6 +1507,8 @@ sessions before being kept:
 |--------|----------------|
 | `Verify-Publish.ps1` | **Run after every publish.** Starts the root launcher, turns its skin server on, and checks the manifest endpoint serves the expected version, all 6 files, gzip, and its own exe back byte-for-byte. Catches the one silent failure: a framework-dependent build at the root answers `/launcher/manifest` with 404 and nobody finds out until rollout day. |
 | `Verify-AutoUpdate.ps1` | The whole mandatory-update path, unattended: a newer host serving, an older client nobody touches, and the client swapping itself byte-for-byte and relaunching. Needs a Debug build **and** a Release publish made at least a minute later, so the host is the newer one. |
+| `Verify-Admin.ps1` | The Admin tab end to end: that the three sub-tabs render at all (a retemplated `TabControl` can show headers over an empty panel — section 11), that a check-in and a crash report posted exactly as another machine would post them are accepted, refused when malformed, and not stored twice, and that the host's own panels then *show* them. 36/36 on 2026-10-07. Creates `admin.flag` if absent and removes it again. |
+| `Verify-Backups.ps1` | The backup buttons on both tabs, against a throwaway world placed in the real saves folder: that the zip appears, opens again, keeps `level.dat` and the region data, and leaves `session.lock` out. `-IncludeServerWorld` additionally backs up the real server world — 110 MB, 297 files, **3 s**, 69.8 MB — and keeps it. 26/26 on 2026-10-07. Also fails if anything reached `launcher_errors.txt`, since that is where an invisible `MessageBox` leaves its evidence. |
 | `Diagnose-MinecraftNet.ps1` | Why Minecraft cannot reach the internet on a machine — see section 10. |
 
 **UI Automation cannot see a `MessageBox`.** Driving a button whose handler shows one
@@ -1407,6 +1528,29 @@ because the dialog never closed and nothing could have happened. One check in th
 delete-disabled drive passed that way before this was understood.
 
 Then assert on what changed **on disk**, not on the status line.
+
+**And read `launcher_errors.txt` first.** Hit again on 2026-10-07 from the other
+direction: a binding error threw *while a template rendered*, WPF's unhandled-exception
+handler raised a MessageBox, and the Admin tab's crash panel therefore never appeared.
+The symptom through UIA was three empty labels, which reads as a layout problem and
+sent two rebuilds chasing one. The exception type and the property name were sitting
+in the log the whole time. `Verify-Backups.ps1` now fails if that file exists at all.
+
+**`FindFirst` can answer `null` while the provider is mid-update.** Populating the
+fleet `DataGrid` is enough to do it, and a tab that is plainly on screen then looks
+missing. Retry for a few seconds before concluding anything — `WaitById` / `WaitByName`
+in `Verify-Admin.ps1`. Worth distinguishing from the real failure above: the retry
+fixed reaching the *tab*, and did nothing for the panel, which is what made it clear
+the second problem was in the product rather than the harness.
+
+**A `try`/`catch` around an HTTP call does not prove a refusal.** An unreachable server
+throws too, so a check written that way reports success for a server that answered
+nothing — one here "passed" against a launcher that had not started. Assert on the
+status code: `$_.Exception.Response.StatusCode.value__` in the 400s.
+
+**`$x[0]` on a single-element pipeline result indexes a string.** PowerShell collapses
+a one-item pipeline to a scalar, so `$new[0]` on one new file name returns its first
+*character*. Wrap pipeline results in `@()` whenever they are indexed.
 
 Things worth knowing before changing it:
 

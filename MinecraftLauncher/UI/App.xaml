@@ -233,5 +233,78 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- Sub-tabs, used inside the Admin tab.
+
+             A default TabControl is light grey with a raised border and looks like a
+             different application dropped into the middle of this one, so the headers
+             are retemplated to read the way the sidebar does: muted until selected,
+             accent underline when it is. The panel keeps no background of its own —
+             the content underneath is already sitting on cards. -->
+        <Style x:Key="SubTabControl" TargetType="TabControl">
+            <Setter Property="Background"      Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding"         Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" BorderBrush="#2D2D2D" BorderThickness="0,0,0,1">
+                                <TabPanel IsItemsHost="True" Panel.ZIndex="1" Margin="0,0,0,-1"/>
+                            </Border>
+
+                            <!-- The name is not decoration: TabControl finds its
+                                 content host by looking for PART_SelectedContentHost,
+                                 and without it the headers render while the panel
+                                 underneath stays completely empty. Every offline check
+                                 still passes, because none of this is Core. -->
+                            <ContentPresenter x:Name="PART_SelectedContentHost"
+                                              Grid.Row="1" ContentSource="SelectedContent"
+                                              Margin="0,14,0,0"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SubTabItem" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize"   Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor"     Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="bd" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="0,0,0,2"
+                                Padding="16,9,16,8">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="BorderBrush"
+                                        Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="False"/>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Application.Resources>
 </Application>

@@ -81,6 +81,19 @@ namespace MinecraftLauncher.Core
         /// <summary>Raised from background threads — marshal before touching UI.</summary>
         public event Action<string>? Log;
 
+        /// <summary>
+        /// A machine reported itself. Raised from a background thread.
+        /// </summary>
+        /// <remarks>
+        /// Carries nothing: the roster on disk is the record, and the handler re-reads
+        /// it. Passing the machine would invite the UI to keep its own half of the list
+        /// and have the two drift.
+        /// </remarks>
+        public event Action? CheckedIn;
+
+        /// <summary>A crash report arrived from another machine.</summary>
+        public event Action? CrashArrived;
+
         public SkinServer(int port = DefaultPort)
         {
             Port = port;
@@ -216,7 +229,7 @@ namespace MinecraftLauncher.Core
                     // off part-way on anything slower than a fast wired LAN.
                     if (IsBulkTransfer(request)) timeout.CancelAfter(BulkTimeoutMs);
 
-                    await RouteAsync(stream, request, timeout.Token);
+                    await RouteAsync(stream, request, RemoteAddressOf(client), timeout.Token);
                 }
                 catch (OperationCanceledException) { }
                 catch (IOException) { }
@@ -225,6 +238,21 @@ namespace MinecraftLauncher.Core
                     Log?.Invoke($"Request failed: {ex.Message}");
                 }
             }
+        }
+
+        /// <summary>
+        /// Which machine a request came from, for the fleet roster. Null when it cannot
+        /// be read, which is never worth failing a request over.
+        /// </summary>
+        private static string? RemoteAddressOf(TcpClient client)
+        {
+            try
+            {
+                return client.Client.RemoteEndPoint is IPEndPoint endpoint
+                    ? endpoint.Address.ToString()
+                    : null;
+            }
+            catch (Exception) { return null; }
         }
 
         /// <summary>Requests that legitimately take far longer than an API call.</summary>
@@ -298,7 +326,8 @@ namespace MinecraftLauncher.Core
         }
 
         // ── Routing ──────────────────────────────────────────────────
-        private async Task RouteAsync(NetworkStream stream, Request request, CancellationToken ct)
+        private async Task RouteAsync(
+            NetworkStream stream, Request request, string? remote, CancellationToken ct)
         {
             string path = request.Path;
             bool isGet  = request.Method == "GET";
@@ -364,6 +393,14 @@ namespace MinecraftLauncher.Core
             else if (isGet && (m = RxRequiredModFile.Match(path)).Success)
             {
                 await HandleRequiredModFileAsync(stream, m.Groups[1].Value, ct);
+            }
+            else if (isPost && path == FleetRoster.Endpoint)
+            {
+                await HandleCheckInAsync(stream, request, remote, ct);
+            }
+            else if (isPost && path == CrashInbox.Endpoint)
+            {
+                await HandleCrashReportAsync(stream, request, ct);
             }
             else
             {
@@ -588,6 +625,113 @@ namespace MinecraftLauncher.Core
             {
                 Log?.Invoke($"Required mods list failed: {ex.Message}");
                 await SendJsonAsync(stream, 500, """{"entries":[]}""", ct);
+            }
+        }
+
+        /// <summary>
+        /// Records a machine reporting itself, for the host's fleet list.
+        /// </summary>
+        /// <remarks>
+        /// Answers 200 for anything it can read and 400 only for a body that is not a
+        /// check-in at all. A client whose report is rejected has no recourse and would
+        /// only retry, so there is nothing useful to tell it.
+        ///
+        /// The roster is read, merged and written per request. These arrive a handful of
+        /// times an evening — once when somebody opens their launcher, once when they
+        /// press PLAY — so there is no reason to hold the file open or cache it, and
+        /// re-reading means the Admin tab and the server always agree.
+        /// </remarks>
+        private async Task HandleCheckInAsync(
+            NetworkStream stream, Request request, string? remote, CancellationToken ct)
+        {
+            var report = FleetRoster.ParseCheckIn(Encoding.UTF8.GetString(request.Body));
+
+            if (report is null)
+            {
+                await SendJsonAsync(stream, 400, """{"error":"not a check-in"}""", ct);
+                return;
+            }
+
+            try
+            {
+                var listing = FleetRoster.Load();
+                var machine = FleetRoster.Merge(listing, report, remote, DateTime.UtcNow);
+                FleetRoster.Save(listing);
+
+                Log?.Invoke(
+                    $"Checked in: {machine.Name} ({machine.Who}) on launcher {machine.LauncherText}" +
+                    (report.Playing ? $", starting {machine.PlayingText}" : ""));
+
+                CheckedIn?.Invoke();
+                await SendJsonAsync(stream, 200, """{"ok":true}""", ct);
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"Check-in from {remote ?? "somewhere"} failed: {ex.Message}");
+                await SendJsonAsync(stream, 500, """{"error":"could not record it"}""", ct);
+            }
+        }
+
+        /// <summary>
+        /// Takes a crash report from another machine so the host can read it without
+        /// walking over to that computer.
+        /// </summary>
+        /// <remarks>
+        /// The sender's details come from the query string and the report text is the
+        /// body. Nothing the sender provides becomes a path — <see cref="CrashInbox"/>
+        /// builds the file name itself — and the body is capped, because this is the one
+        /// route that lets another machine put bytes on the host's disk unasked.
+        /// </remarks>
+        private async Task HandleCrashReportAsync(
+            NetworkStream stream, Request request, CancellationToken ct)
+        {
+            if (request.Body.Length > CrashInbox.MaxBytes)
+            {
+                await SendJsonAsync(stream, 413, """{"error":"too large"}""", ct);
+                return;
+            }
+
+            // Whitespace counts as empty. Checked on the decoded text rather than the
+            // byte count, because a body of one space is not length zero and would
+            // otherwise come back 200 "accepted but not stored" — which reads as a
+            // duplicate and hides a client sending nothing useful.
+            string text = Encoding.UTF8.GetString(request.Body);
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                await SendJsonAsync(stream, 400, """{"error":"empty report"}""", ct);
+                return;
+            }
+
+            var from = new CrashInbox.Sender
+            {
+                Machine   = QueryValue(request.Query, "machine") ?? "unknown",
+                Username  = QueryValue(request.Query, "username"),
+                Minecraft = QueryValue(request.Query, "minecraft"),
+                File      = QueryValue(request.Query, "file"),
+                Received  = DateTime.UtcNow
+            };
+
+            try
+            {
+                var arrived = CrashInbox.Receive(from, text);
+
+                if (arrived is null)
+                {
+                    // Almost always a duplicate, which is the client behaving correctly
+                    // after a host that was switched off. Not worth a log line each time.
+                    await SendJsonAsync(stream, 200, """{"ok":true,"stored":false}""", ct);
+                    return;
+                }
+
+                Log?.Invoke($"Crash report from {arrived.Who}: {arrived.Headline}");
+                CrashArrived?.Invoke();
+                await SendJsonAsync(stream, 200, """{"ok":true,"stored":true}""", ct);
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"Crash report from {from.Machine} failed: {ex.Message}");
+                await SendJsonAsync(stream, 500, """{"error":"could not store it"}""", ct);
             }
         }
 
