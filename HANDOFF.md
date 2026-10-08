@@ -790,6 +790,30 @@ What is genuinely outstanding:
 0. **Put 1.2.276.353 on the host.** Everything below matters less than this: it is
    what turns rollout from a chore into something that happens by itself.
 
+   **Be honest about what is actually out there, because it is not known.** The last
+   build confirmed to have reached the machines is **1.2.265.376**. Everything since
+   — `.1389`, `1.2.266.182`, `.222`, `1.2.276.334`, `.353` — was published here and
+   **never confirmed deployed**: the rollout zip kept being eaten on download from
+   Google Drive (section 15), and a USB stick was loaded but nothing was reported
+   back. So do not assume the fleet is current.
+
+   What this means for the hand-off:
+   - **The watcher shipped in 1.2.265.373**, and the comparison is day-based, so
+     `276 > 265`. Any machine on 1.2.265.376 or later will pull 1.2.276.353 by
+     itself once the host serves it.
+   - **A machine older than 1.2.265.373 has no watcher** and needs one copy by hand.
+     Its version is in the sidebar.
+   - **Do not download the zip to get it there.** That is the one step that has ever
+     failed. USB or a LAN copy carries no Mark of the Web and skips the
+     download-time reputation check entirely — section 15 has the measurements.
+
+   **The unattended path itself is proven on this code**, not just reasoned about:
+   `tools\Verify-AutoUpdate.ps1` ran 7/7 on 2026-10-04 against two real installs,
+   detect to back-up-on-the-new-build in **18 seconds**, byte-for-byte, nobody
+   touching anything. If a machine does not update, the cause is which build it is
+   on or Defender eating the swap — not the mechanism. `update-watcher.log` beside
+   each launcher says which.
+
 1. **Run the network diagnostic on a machine where Minecraft cannot reach the
    internet.** `tools\Diagnose-MinecraftNet.ps1` (copy the whole `tools\` folder
    across; it finds `runtime\` itself):
@@ -1328,7 +1352,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **550 checks, about 8 seconds** — 469 of them with no internet.
+`MinecraftLauncher.Tests/` — **471 offline checks in about 4 seconds**, and around 550 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
 
 ```powershell
 tools\run-tests.ps1                 # everything

@@ -11,10 +11,15 @@ The C# launcher (`MinecraftLauncher/`, .NET 10 WPF) is **complete and shipping**
 The whole PowerShell feature set is ported plus a good deal more;
 `MinecraftLauncher-Standalone.ps1` is now only a behavioural reference.
 
-**Current build: 1.2.276.353** (2026-09-23), at the repo root and in the rollout
+**Current build: 1.2.276.353** (2026-10-04), at the repo root and in the rollout
 zip kept outside the repo (56.2 MB, verified byte-for-byte). Updates are mandatory
-from here on, so **this is the last build anyone copies by hand**: put it on the
-host and every other machine installs it itself.
+and self-installing, so in principle one copy onto the host carries the fleet.
+
+**Do not assume the fleet is current.** The last build *confirmed* to have reached
+the machines is 1.2.265.376; everything since was published here and never
+confirmed deployed, because the zip kept being eaten on download. The unattended
+path itself is proven — 7/7, 18 seconds — so the open question is which build each
+machine is on, not whether the mechanism works. HANDOFF.md section 10 item 0.
 
 Shipping and verified on the real machines: Client / Server / Mods / Skins / Setup;
 Vanilla, Fabric, Forge and NeoForge; the LAN skin server and 3D skin preview; the
@@ -23,6 +28,11 @@ loader checks by family *and* version; Modrinth mod downloading; Fabric loader
 updating that replaces rather than accumulates; session shutdown; and self-update
 over the LAN, now unattended. What each of those does and why is HANDOFF.md
 section 5 — read it there rather than expecting a summary here.
+
+Built and tested here but **never run on the real machines**: the crash report
+viewer, mod update checking against Modrinth, "Delete disabled", Fabric loader
+packs for servers, and required mods. They are covered by tests and by driving the
+real UI; they have not met twenty machines and a Friday evening. Also section 5.
 
 Two things are worth carrying in your head because they shape decisions:
 
@@ -95,8 +105,9 @@ beside the exe and finds nothing.
   compiled fine and failed at run time — a wrong Java version, a silently
   misdirected installer, a profile the scanner could not see. Launch it, drive the
   UI, read the server output.
-- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 550 checks, about 8
-  seconds, exit code 0 when clean (469 of them need no internet). `-Offline` skips the network suite. Piped
+- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 471 offline checks in about 4
+  seconds, exit code 0 when clean; around 550 with the network suite, which moves
+  with the live Modrinth API. `-Offline` skips the network suite. Piped
   anywhere it prints only failures and the count — `-ShowAll` for a line per check.
   Add to `MinecraftLauncher.Tests/Suites/` as work lands — and write the checks against
   **captured real output**, not an invented format; every parser in this project that
