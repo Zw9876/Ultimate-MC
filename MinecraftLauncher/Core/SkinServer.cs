@@ -398,6 +398,10 @@ namespace MinecraftLauncher.Core
             {
                 await HandleCheckInAsync(stream, request, remote, ct);
             }
+            else if (isGet && path == PlayBlocks.Endpoint)
+            {
+                await HandlePlayBlocksAsync(stream, ct);
+            }
             else if (isPost && path == CrashInbox.Endpoint)
             {
                 await HandleCrashReportAsync(stream, request, ct);
@@ -669,6 +673,41 @@ namespace MinecraftLauncher.Core
             {
                 Log?.Invoke($"Check-in from {remote ?? "somewhere"} failed: {ex.Message}");
                 await SendJsonAsync(stream, 500, """{"error":"could not record it"}""", ct);
+            }
+        }
+
+        /// <summary>
+        /// Tells a client which machines the host has turned playing off for.
+        /// </summary>
+        /// <remarks>
+        /// The whole list, not an answer about the asker. The client decides whether a
+        /// block names it, and caches only its own entries — which means this endpoint
+        /// does not have to trust a caller's claim about which machine it is, and a
+        /// client cannot probe for someone else's status by lying about its name.
+        ///
+        /// Expired blocks are dropped on the way out, and the file rewritten when any
+        /// went, so a timed block tidies itself up the first time anybody asks after it
+        /// runs out rather than needing the host to notice.
+        ///
+        /// Read from disk per request, like the required-mods list: these arrive a few
+        /// times an evening and re-reading is what keeps this and the Admin tab in
+        /// agreement.
+        /// </remarks>
+        private async Task HandlePlayBlocksAsync(NetworkStream stream, CancellationToken ct)
+        {
+            try
+            {
+                var listing = PlayBlocks.LoadLocal();
+
+                if (PlayBlocks.DropExpired(listing, DateTime.UtcNow) > 0)
+                    PlayBlocks.SaveLocal(listing);
+
+                await SendJsonAsync(stream, 200, PlayBlocks.ToJson(listing), ct);
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"Play blocks list failed: {ex.Message}");
+                await SendJsonAsync(stream, 500, """{"blocks":[]}""", ct);
             }
         }
 

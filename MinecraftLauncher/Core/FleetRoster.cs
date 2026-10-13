@@ -60,6 +60,13 @@ namespace MinecraftLauncher.Core
             [JsonPropertyName("username")] public string? Username { get; set; }
             [JsonPropertyName("launcher")] public string? Launcher { get; set; }
 
+            /// <summary>
+            /// Windows' own identifier for this installation, so the host has something
+            /// to block that survives renaming the computer. Absent from launchers older
+            /// than this field, which remain blockable by name.
+            /// </summary>
+            [JsonPropertyName("guid")] public string? Guid { get; set; }
+
             /// <summary>The Minecraft version they last started, when they started one.</summary>
             [JsonPropertyName("minecraft")] public string? Minecraft { get; set; }
             [JsonPropertyName("loader")]    public string? Loader { get; set; }
@@ -78,6 +85,7 @@ namespace MinecraftLauncher.Core
             [JsonPropertyName("machine")]  public string Name { get; set; } = "";
             [JsonPropertyName("username")] public string? Username { get; set; }
             [JsonPropertyName("launcher")] public string? Launcher { get; set; }
+            [JsonPropertyName("guid")]     public string? Guid { get; set; }
             [JsonPropertyName("minecraft")] public string? Minecraft { get; set; }
             [JsonPropertyName("loader")]   public string? Loader { get; set; }
             [JsonPropertyName("address")]  public string? Address { get; set; }
@@ -110,6 +118,18 @@ namespace MinecraftLauncher.Core
 
             [JsonIgnore]
             public string SeenText => Describe(DateTime.UtcNow - Seen);
+
+            /// <summary>
+            /// Whether playing is turned off here, filled in by the Admin tab.
+            /// </summary>
+            /// <remarks>
+            /// Settable and not serialized, rather than computed from a block list. The
+            /// roster records what machines reported about themselves; whether one is
+            /// blocked is the host's own decision and lives in <see cref="PlayBlocks"/>.
+            /// Keeping the two apart means neither file can contradict the other.
+            /// </remarks>
+            [JsonIgnore]
+            public string BlockText { get; set; } = "";
         }
 
         public sealed class Listing
@@ -162,6 +182,7 @@ namespace MinecraftLauncher.Core
                 listing.Machines.Add(machine);
             }
 
+            if (!string.IsNullOrWhiteSpace(report.Guid))      machine.Guid      = report.Guid!.Trim();
             if (!string.IsNullOrWhiteSpace(report.Username))  machine.Username  = report.Username!.Trim();
             if (!string.IsNullOrWhiteSpace(report.Launcher))  machine.Launcher  = report.Launcher!.Trim();
             if (!string.IsNullOrWhiteSpace(report.Minecraft)) machine.Minecraft = report.Minecraft!.Trim();
@@ -307,6 +328,7 @@ namespace MinecraftLauncher.Core
             new()
             {
                 Machine   = ThisMachine,
+                Guid      = PlayBlocks.ThisMachineGuid,
                 Username  = string.IsNullOrWhiteSpace(config.Username) ? null : config.Username.Trim(),
                 Launcher  = LauncherPackage.CurrentVersion.ToString(),
                 Minecraft = string.IsNullOrWhiteSpace(minecraft) ? null : minecraft,

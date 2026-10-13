@@ -1009,8 +1009,10 @@
                                                             DisplayMemberBinding="{Binding PlayingText}"/>
                                             <GridViewColumn Header="Seen" Width="105"
                                                             DisplayMemberBinding="{Binding SeenText}"/>
-                                            <GridViewColumn Header="Address" Width="125"
+                                            <GridViewColumn Header="Address" Width="115"
                                                             DisplayMemberBinding="{Binding Address}"/>
+                                            <GridViewColumn Header="Playing" Width="140"
+                                                            DisplayMemberBinding="{Binding BlockText}"/>
                                         </GridView>
                                     </ListView.View>
                                 </ListView>
@@ -1020,8 +1022,16 @@
                                 <Button x:Name="FleetRefreshButton" Content="Refresh" Width="100" Height="32"
                                         Margin="0,0,8,0" Click="FleetRefresh_Click"
                                         Style="{StaticResource PlainButton}"/>
-                                <Button x:Name="FleetForgetButton" Content="Forget this computer"
-                                        Width="170" Height="32" Margin="0,0,8,0"
+                                <Button x:Name="FleetBlockButton" Content="Turn playing off…"
+                                        Width="150" Height="32" Margin="0,0,8,0"
+                                        Click="FleetBlock_Click" Style="{StaticResource PlainButton}"
+                                        ToolTip="Their launcher refuses to start the game, and tells them why. Optionally bans them on the running server too, which is the part that cannot be bypassed."/>
+                                <Button x:Name="FleetUnblockButton" Content="Turn it back on"
+                                        Width="140" Height="32" Margin="0,0,8,0"
+                                        Click="FleetUnblock_Click" Style="{StaticResource PlainButton}"
+                                        ToolTip="Lifts the block. Applies the next time that machine can see this host."/>
+                                <Button x:Name="FleetForgetButton" Content="Forget"
+                                        Width="90" Height="32" Margin="0,0,8,0"
                                         Click="FleetForget_Click" Style="{StaticResource PlainButton}"
                                         ToolTip="Removes the selected row. It comes back if that machine checks in again."/>
                                 <TextBlock x:Name="FleetStatus" VerticalAlignment="Center" Margin="8,0,0,0"

@@ -387,6 +387,54 @@ including where WebView2 is loaded from — depends on it.
     checks in is simply absent, not flagged: it may be switched off, and a list that
     cried wolf about every powered-down computer would be ignored within a week.
 
+- **Turning playing off for one machine** (Admin tab -> FLEET) — added 2026-10-12,
+  because a Minecraft ban is by username and anybody can pick another one, which was
+  the whole of the ask. `Core/PlayBlocks.cs`, `Core/PlayBlocksClient.cs`,
+  `UI/BlockWindow.xaml`, `GET /launcher/blocks`.
+
+  **Be clear which half holds.** Two layers, and they are not equal:
+
+  | Layer | Effect | Bypassable |
+  |---|---|---|
+  | `ban-ip` on the running server, plus `ban <name>` | cannot join by any username | **No** — the server enforces it |
+  | The launcher refusing PLAY | the game does not start, and it says why | Yes, deliberately |
+
+  The launcher half runs on a computer the person physically controls, so it is a
+  deterrent: the cache can be deleted, the folder copied, the official launcher
+  installed. What it buys is that getting round it is a deliberate, visible act
+  rather than typing a different name. **The server-side ban is the part that
+  actually stops them playing**, and it uses the address the fleet roster already
+  recorded. Both are lifted together — leaving a `ban-ip` behind after the launcher
+  block is gone is the shape of bug where somebody is told they can play and then
+  cannot, with nothing on screen to explain it.
+
+  - **Matched on the computer name *or* the Windows `MachineGuid`**, so renaming the
+    computer does not escape it and neither does reinstalling the launcher. Defeating
+    it needs local admin. A deliberately rejected option was an SMBIOS hardware
+    fingerprint: it would survive even a Windows reinstall, and it is more collection
+    from other people's machines than this problem justifies. A launcher too old to
+    report a GUID is still blockable by name.
+  - **An unreachable host means the last answer, not "allowed".** Without that,
+    unplugging the network defeats the feature. Failing closed was not an option
+    either — it would stop everybody playing single-player whenever the host is off.
+    So the verdict is cached, and an unban applies the next time the machine can see
+    the host, which is also when somebody wants to play on it. A client caches only
+    its *own* entries; there is no reason for one person's computer to hold a readable
+    list of who else is blocked.
+  - **The machine holding `admin.flag` is never blocked**, checked at the point of
+    enforcement rather than when the list is written — so a list carried in from
+    somewhere else cannot lock the host out of its own launcher either.
+  - **Blocks can expire.** An hour, the evening, a week, or until lifted. Expired ones
+    are dropped when a client asks and when the Admin tab is opened, so a timed block
+    tidies itself up without anybody remembering to.
+  - **The launcher still opens**, and PLAY says who turned it off and why. Blocking the
+    whole launcher would present a broken program, and somebody who thinks it is broken
+    sets about fixing it.
+  - **PLAY now discovers the host once** and shares it between the block check and the
+    required-mods check (`HostForThisLaunchAsync`). This feature would otherwise have
+    added a third 1500 ms UDP wait to a launch that already paid two — part of section
+    10 item 7.
+
 - **Crash reports reaching the host** (Admin tab) — clients hand their crash reports
   over so the person who fixes them does not have to walk to each machine.
   `Core/CrashInbox.cs`, `POST /launcher/crash`. The **game watcher** sends them after
@@ -838,7 +886,8 @@ and a zip built from a working folder will pick them up:
 | `required-mods.json`, `required-mods\` | The host's list and the jars it serves. A client with its own copy would check itself against a stale list instead of asking the host. |
 | `fleet.json` | The host's record of every machine, usernames included. Pointless on a client and not theirs to carry. |
 | `crash-inbox\` | Other people's crash reports. |
-| `crash-sent.txt`, `required-mods-declined.txt` | Per-machine bookkeeping. Shipping one makes every machine think it has already sent its crashes, or already declined a mod. |
+| `crash-sent.txt`, `required-mods-declined.txt`, `play-blocks-cache.json` | Per-machine bookkeeping. Shipping one makes every machine think it has already sent its crashes, already declined a mod, or — worst of the three — that it is blocked from playing. |
+| `play-blocks.json` | The host's list of machines playing is turned off for. On a client it would be ignored, but it is nobody else's business. Carried in the **admin** zip, like the required-mods list. |
 | `backups\` | World zips. The one that matters is 70 MB, and the zip is meant to be 56. |
 | `config.txt`, `computer_uuid.dat` | Covered above too, and enforced by the same list in the build script. |
 | `launcher_errors.txt`, `update-watcher.log` | This machine's logs. |
@@ -879,14 +928,13 @@ committed here is world-readable the moment it is pushed.
 
 ## 10. Next tasks
 
-The port is complete and shipping. Current build at the repo root and in the rollout
-zip: **1.2.280.291**, rebuilt 2026-10-08 by `tools\Build-RolloutZip.ps1` (56.3 MB,
-launcher verified byte-for-byte inside it). A second zip,
-`Minecraft-Launcher-Admin.zip`, holds the host-only side and **goes to nobody** —
-section 8.
+The port is complete and shipping. Current build at the repo root: **1.2.285.114**.
+**The rollout zip is still on 1.2.280.291** — rebuild it with
+`tools\Build-RolloutZip.ps1`, which also writes `Minecraft-Launcher-Admin.zip` for
+the host-only side. That one **goes to nobody** — section 8.
 
 **This build has to reach the host by hand.** Updates are mandatory and
-self-installing (section 5), so once the host serves 1.2.280.291 every machine that
+self-installing (section 5), so once the host serves the current build every machine that
 already has the watcher installs it on its own within a couple of minutes of the host
 starting their server. Until the host has it, nothing else changes. Whether that
 makes it the *last* hand-copy depends on which build each machine is actually on,
@@ -903,21 +951,21 @@ once before the host can close it for them.
 
 What is genuinely outstanding:
 
-0. **Put 1.2.280.291 on the host.** Everything below matters less than this: it is
+0. **Put the current build on the host.** Everything below matters less than this: it is
    what turns rollout from a chore into something that happens by itself — and it is
    now also what makes the fleet visible instead of guessed at.
 
    **Be honest about what is actually out there, because it is not known.** The last
    build confirmed to have reached the machines is **1.2.265.376**. Everything since
-   — `.1389`, `1.2.266.182`, `.222`, `1.2.276.334`, `.353`, `1.2.280.291` — was
-   published here and
+   — `.1389`, `1.2.266.182`, `.222`, `1.2.276.334`, `.353`, `1.2.280.291`,
+   `1.2.285.114` — was published here and
    **never confirmed deployed**: the rollout zip kept being eaten on download from
    Google Drive (section 15), and a USB stick was loaded but nothing was reported
    back. So do not assume the fleet is current.
 
    What this means for the hand-off:
    - **The watcher shipped in 1.2.265.373**, and the comparison is day-based, so
-     `280 > 265`. Any machine on 1.2.265.376 or later will pull 1.2.280.291 by
+     `285 > 265`. Any machine on 1.2.265.376 or later will pull the newer build by
      itself once the host serves it.
    - **A machine older than 1.2.265.373 has no watcher** and needs one copy by hand.
      Its version is in the sidebar.
@@ -925,7 +973,7 @@ What is genuinely outstanding:
      failed. USB or a LAN copy carries no Mark of the Web and skips the
      download-time reputation check entirely — section 15 has the measurements.
 
-   **Once the host is on 1.2.280.291 this stops being guesswork.** The Admin tab's
+   **Once the host is on a build with the FLEET list this stops being guesswork.** The Admin tab's
    FLEET list shows every machine that has checked in, which build it runs and who
    last played on it (section 5), so "is the fleet current?" becomes something to look
    at rather than something to reason about. It needs the host serving before anything
@@ -1417,6 +1465,28 @@ Do not "restore fidelity" on these — the PowerShell behavior was wrong.
   (section 13). The verification script read on past it and reported empty labels.
   `launcher_errors.txt` had the answer the whole time — read it first.
 
+- **`FindWindow(NULL, title)` does not find a `MessageBox`.** Measured 2026-10-12
+  against a live block dialog, in the same process:
+
+  ```
+  FindWindowW(null,     "Playing is turned off on this computer")  ->  0
+  FindWindowW("#32770", "Playing is turned off on this computer")  ->  a handle
+  ```
+
+  A null class name silently matches nothing, so the obvious call reports "the dialog
+  never appeared" for a dialog that is plainly on screen. Either pass the `#32770`
+  dialog class, or — better, and what `Verify-Blocks.ps1` does — enumerate the
+  process's own visible windows with `EnumWindows`, which is also immune to matching
+  some other application's window and reporting a pass that never happened. This is
+  the counterpart to "UI Automation cannot see a MessageBox" in section 13: UIA cannot
+  see it, and the first Win32 call you would reach for does not either.
+
+- **`$pid` is a read-only automatic variable in PowerShell.** Using it as a function
+  parameter name throws `Cannot overwrite variable pid` on *every call*, and since the
+  call was wrapped in a wait loop the symptom was "the dialog never appeared" — the
+  same symptom as the bug above, which is how one five-minute fix became two. Name it
+  `$processId`. Also read-only: `$host`, `$args`, `$input`, `$true`, `$false`, `$null`.
+
 - **Non-ASCII characters in a `.ps1` file are a parse hazard under Windows
   PowerShell 5.1.** It reads a BOM-less file using the ANSI code page, so a UTF-8
   em-dash arrives as three characters, one of which is a quote — silently opening an
@@ -1505,7 +1575,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **617 offline checks in about 4 seconds**, and around 700 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
+`MinecraftLauncher.Tests/` — **692 offline checks in about 10 seconds**, and around 780 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
 
 ```powershell
 tools\run-tests.ps1                 # everything
@@ -1517,8 +1587,8 @@ tools\run-tests.ps1 -Quiet          # failures and the summary only
 ```
 
 Suites: `versions`, `mods`, `chunky`, `players`, `loader`, `replace`, `enforce`,
-`swap`, `crashes`, `cleanup`, `required`, `deps`, `backups`, `fleet`, `packs`,
-`serverpacks`, `modrinth` (the last needs internet). Exit code is 0 only when
+`swap`, `crashes`, `cleanup`, `required`, `deps`, `backups`, `fleet`, `blocks`,
+`packs`, `serverpacks`, `modrinth` (the last needs internet). Exit code is 0 only when
 everything passed.
 
 **How much it prints depends on who is reading.** In a terminal it prints a line per
@@ -1542,7 +1612,10 @@ sessions before being kept:
 | `Verify-AutoUpdate.ps1` | The whole mandatory-update path, unattended: a newer host serving, an older client nobody touches, and the client swapping itself byte-for-byte and relaunching. Needs a Debug build **and** a Release publish made at least a minute later, so the host is the newer one. |
 | `Verify-Admin.ps1` | The Admin tab end to end: that the three sub-tabs render at all (a retemplated `TabControl` can show headers over an empty panel — section 11), that a check-in and a crash report posted exactly as another machine would post them are accepted, refused when malformed, and not stored twice, and that the host's own panels then *show* them. 36/36 on 2026-10-07. Creates `admin.flag` if absent and removes it again. |
 | `Verify-Backups.ps1` | The backup buttons on both tabs, against a throwaway world placed in the real saves folder: that the zip appears, opens again, keeps `level.dat` and the region data, and leaves `session.lock` out. `-IncludeServerWorld` additionally backs up the real server world — 110 MB, 297 files, **3 s**, 69.8 MB — and keeps it. 26/26 on 2026-10-07. Also fails if anything reached `launcher_errors.txt`, since that is where an invisible `MessageBox` leaves its evidence. |
+| `Verify-Blocks.ps1` | **The one check in the play-block feature that counts.** Plants a block for this machine in the cache, presses PLAY on a real launcher, and asserts on *behaviour*: a dialog appeared, the launcher did **not** close, and **no Java process started**. Then does it again with an expired block and asserts nothing happens. Needs `admin.flag` absent — that machine is never blocked — which is why it is not part of `Verify-Admin.ps1`. 10/10 on 2026-10-12. |
+| `Build-RolloutZip.ps1` | Builds both zips, refusing to write an update zip that contains anything host-only. See section 8. |
 | `Diagnose-MinecraftNet.ps1` | Why Minecraft cannot reach the internet on a machine — see section 10. |
+| `Test-DownloadHosts.ps1` | Which hosts a machine can reach: the four Minecraft ones, and the candidates for hosting a payload (GitHub, Cloudflare/R2, S3, GCS, Azure Blob, archive.org) with `example.com` and Modrinth as controls. Reports DNS, a TLS handshake with SNI, and the certificate issuer, because interception decides whether hostname workarounds can help at all. |
 
 **UI Automation cannot see a `MessageBox`.** Driving a button whose handler shows one
 looks exactly like a handler that never ran: `InvokePattern.Invoke` returns straight

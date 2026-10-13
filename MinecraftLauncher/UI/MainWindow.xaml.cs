@@ -420,14 +420,82 @@ namespace MinecraftLauncher.UI
         /// this version and loader actually changes. The CHECK button ignores that,
         /// because pressing it *is* changing your mind.
         /// </remarks>
-        private async Task OfferRequiredModsAsync(string version, string loader, bool askedByPerson)
+        /// <summary>
+        /// The host for this launch, found once and remembered for the session.
+        /// </summary>
+        /// <remarks>
+        /// Everything on the PLAY path that needs to ask the host should take it from
+        /// here. The UDP probe waits 1500 ms when nothing answers, and paying that once
+        /// per press instead of once per question is most of the launch delay.
+        /// </remarks>
+        private string? _sessionHost;
+        private bool _sessionHostResolved;
+
+        private async Task<string?> HostForThisLaunchAsync()
+        {
+            if (_sessionHostResolved) return _sessionHost;
+
+            string? configured = _config.SkinServer?.Trim();
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                _sessionHost = configured;
+            }
+            else
+            {
+                // Already known if this launcher adopted somebody else's skin server.
+                _sessionHost = _adoptedSkinServer
+                    ?? (await Task.Run(() => SkinDiscovery.FindRemote()?.Address));
+            }
+
+            _sessionHostResolved = true;
+            return _sessionHost;
+        }
+
+        /// <summary>
+        /// Whether this computer may start a game. False means it must not.
+        /// </summary>
+        /// <remarks>
+        /// A dialog rather than the status line, because the status line is where
+        /// ordinary progress goes and this has to be read. It says who turned it off and
+        /// why, and never looks like a fault — somebody who thinks the launcher is
+        /// broken will set about fixing it.
+        /// </remarks>
+        private async Task<bool> AllowedToPlayAsync(string? host)
+        {
+            try
+            {
+                using var work = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var verdict = await PlayBlocksClient.CheckAsync(host, work.Token);
+
+                if (!verdict.Blocked) return true;
+
+                MessageBox.Show(
+                    PlayBlocks.Explain(verdict.Block!),
+                    "Playing is turned off on this computer",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+
+                ClientStatus.Text = "Playing is turned off on this computer.";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                // Never fail closed. A fault in this check must not be able to stop
+                // somebody playing — that is a far worse outcome than a block that
+                // did not apply, and it would be indistinguishable from one.
+                App.Log(ex);
+                return true;
+            }
+        }
+
+        private async Task OfferRequiredModsAsync(
+            string version, string loader, bool askedByPerson, string? knownHost = null)
         {
             try
             {
                 var log = new Progress<string>(s => ClientStatus.Text = s);
 
                 using var work = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-                var fetched = await RequiredModsClient.FetchAsync(_config, log, work.Token);
+                var fetched = await RequiredModsClient.FetchAsync(_config, log, work.Token, knownHost);
 
                 var wanted = fetched.Listing.For(version, loader);
                 if (wanted.Count == 0)
@@ -993,9 +1061,27 @@ namespace MinecraftLauncher.UI
             if (FleetList is null) return;
 
             var listing = FleetRoster.Load();
-            FleetList.ItemsSource = FleetRoster.Sorted(listing);
+            var machines = FleetRoster.Sorted(listing);
 
-            FleetSummary.Text = FleetRoster.Summarise(listing, LauncherPackage.CurrentVersion);
+            // Expired blocks are dropped here as well as when a client asks, so the
+            // list a person reads never shows a block that has already run out.
+            var blocks = PlayBlocks.LoadLocal();
+            if (PlayBlocks.DropExpired(blocks, DateTime.UtcNow) > 0) PlayBlocks.SaveLocal(blocks);
+
+            foreach (var machine in machines)
+            {
+                var block = PlayBlocks.InForce(blocks, machine.Name, machine.Guid, DateTime.UtcNow);
+
+                machine.BlockText = block is null
+                    ? "yes"
+                    : block.Until is null ? "OFF - until lifted" : $"OFF - to {block.UntilText}";
+            }
+
+            FleetList.ItemsSource = machines;
+
+            int off = machines.Count(m => m.BlockText.StartsWith("OFF"));
+            FleetSummary.Text = FleetRoster.Summarise(listing, LauncherPackage.CurrentVersion) +
+                                (off > 0 ? $"  Playing is off on {off} of them." : "");
 
             // The one thing that makes this list misleading if it is not said: a
             // machine only reports itself when it can see this host, so an empty list
@@ -1016,6 +1102,123 @@ namespace MinecraftLauncher.UI
         {
             RefreshFleet();
             FleetStatus.Text = $"Read at {DateTime.Now:HH:mm:ss}.";
+        }
+
+        /// <summary>
+        /// Turns playing off for the selected machine.
+        /// </summary>
+        /// <remarks>
+        /// Two layers, and they are not equal. The launcher block is a deterrent on a
+        /// computer somebody else controls; the server-side ban is enforced by the
+        /// server and cannot be bypassed from the client at all. The dialog ticks the
+        /// server ban by default for that reason, and only offers it when there is a
+        /// running server to issue it to.
+        ///
+        /// Nothing is selected is not an error: the dialog lets a computer name be
+        /// typed, which covers a machine that has never checked in.
+        /// </remarks>
+        private void FleetBlock_Click(object sender, RoutedEventArgs e)
+        {
+            var chosen = FleetList.SelectedItem as FleetRoster.Machine;
+            bool serverUp = _serverSession?.IsRunning == true;
+
+            var dialog = new BlockWindow(chosen?.Name, chosen?.Guid, chosen?.Username, serverUp)
+            {
+                Owner = this
+            };
+
+            if (dialog.ShowDialog() != true || dialog.Result is null) return;
+            var choice = dialog.Result;
+
+            var blocks = PlayBlocks.LoadLocal();
+            var block = PlayBlocks.Set(
+                blocks, choice.Machine, choice.Guid, choice.Username,
+                choice.Reason, choice.Duration, FleetRoster.ThisMachine, DateTime.UtcNow);
+
+            if (!PlayBlocks.SaveLocal(blocks))
+            {
+                FleetStatus.Text = $"Could not write {PlayBlocks.FilePath}.";
+                return;
+            }
+
+            var said = new List<string> { $"Playing is off on {block.Machine} ({block.UntilText})." };
+
+            // The part that actually holds. Address first, because that is what
+            // survives them picking a different username.
+            if (choice.AlsoBanOnServer && _serverSession?.IsRunning == true)
+            {
+                string? address = chosen?.Address;
+
+                if (!string.IsNullOrWhiteSpace(address))
+                {
+                    string why = choice.Reason ?? "blocked by the host";
+                    _serverSession.SendCommand($"ban-ip {address} {why}");
+                    said.Add($"Banned {address} on the server.");
+                }
+                else
+                {
+                    said.Add("No address on record for that machine, so no ban-ip was issued — " +
+                             "it has not checked in from this host yet.");
+                }
+
+                if (!string.IsNullOrWhiteSpace(choice.Username))
+                {
+                    _serverSession.SendCommand($"ban {choice.Username} {choice.Reason ?? "blocked by the host"}");
+                    said.Add($"Banned {choice.Username} by name.");
+                }
+            }
+
+            FleetStatus.Text = string.Join(" ", said);
+            RefreshFleet();
+        }
+
+        /// <summary>
+        /// Lifts a block, and the matching server bans with it.
+        /// </summary>
+        /// <remarks>
+        /// Both sides are undone together. Leaving a <c>ban-ip</c> in place after the
+        /// launcher block is lifted is the shape of bug where somebody is told they can
+        /// play again and then cannot, with nothing on screen explaining why.
+        /// </remarks>
+        private void FleetUnblock_Click(object sender, RoutedEventArgs e)
+        {
+            if (FleetList.SelectedItem is not FleetRoster.Machine chosen)
+            {
+                FleetStatus.Text = "Pick a computer in the list first.";
+                return;
+            }
+
+            var blocks = PlayBlocks.LoadLocal();
+            var existing = PlayBlocks.InForce(blocks, chosen.Name, chosen.Guid, DateTime.UtcNow);
+
+            bool removed = PlayBlocks.Remove(blocks, chosen.Name, chosen.Guid);
+            if (removed) PlayBlocks.SaveLocal(blocks);
+
+            var said = new List<string>();
+
+            said.Add(removed
+                ? $"Playing is back on for {chosen.Name}. It applies there the next time that " +
+                  "machine can see this host."
+                : $"{chosen.Name} was not blocked.");
+
+            if (_serverSession?.IsRunning == true)
+            {
+                if (!string.IsNullOrWhiteSpace(chosen.Address))
+                {
+                    _serverSession.SendCommand($"pardon-ip {chosen.Address}");
+                    said.Add($"Unbanned {chosen.Address}.");
+                }
+
+                string? name = existing?.Username ?? chosen.Username;
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    _serverSession.SendCommand($"pardon {name}");
+                    said.Add($"Unbanned {name}.");
+                }
+            }
+
+            FleetStatus.Text = string.Join(" ", said);
+            RefreshFleet();
         }
 
         private void FleetForget_Click(object sender, RoutedEventArgs e)
@@ -1352,10 +1555,18 @@ namespace MinecraftLauncher.UI
             _config.LastLoader = loader;
             _config.Save();
 
+            // One discovery for the whole launch, shared by the two things below. PLAY
+            // already paid this 1500 ms wait twice (handoff section 10, item 7) and a
+            // third would be the most noticeable part of the block check.
+            string? host = await HostForThisLaunchAsync();
+
+            // First, because the point of it is that the game does not start.
+            if (!await AllowedToPlayAsync(host)) return;
+
             // Before the game starts, because mods have to be on disk before Minecraft
             // reads the folder — and before the launcher closes, because after PLAY
             // there is no window left to ask in.
-            await OfferRequiredModsAsync(version, loader, askedByPerson: false);
+            await OfferRequiredModsAsync(version, loader, askedByPerson: false, knownHost: host);
 
             try
             {

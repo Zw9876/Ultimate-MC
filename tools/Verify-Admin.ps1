@@ -86,8 +86,10 @@ Start-Sleep -Seconds 3
 # anything, so start from nothing.
 $rosterPath = Join-Path $repo 'fleet.json'
 $inboxPath  = Join-Path $repo 'crash-inbox'
+$blocksPath = Join-Path $repo 'play-blocks.json'
 if (Test-Path $rosterPath) { Remove-Item $rosterPath -Force }
 if (Test-Path $inboxPath)  { Remove-Item $inboxPath -Recurse -Force }
+if (Test-Path $blocksPath) { Remove-Item $blocksPath -Force }
 
 $p = Start-Process $exe -PassThru
 Start-Sleep -Seconds 16
@@ -257,6 +259,50 @@ if (Test-Path $inboxPath) {
 
 # -- and the host's own UI shows all of it ------------------------
 
+# ---- the block list, served to clients -------------------------
+
+try {
+    $b = Invoke-RestMethod -Uri "$base/launcher/blocks" -TimeoutSec 10
+    Check 'the block endpoint answers' $true ''
+    Check 'with nothing blocked yet' (@($b.blocks).Count -eq 0) (@($b.blocks).Count)
+} catch {
+    Check 'the block endpoint answers' $false $_.Exception.Message
+}
+
+# Written as the Admin tab writes it. The dialog itself is not driven here: it
+# confirms with a MessageBox, which UI Automation cannot see (HANDOFF 13).
+$soon = (Get-Date).ToUniversalTime().AddHours(3).ToString('yyyy-MM-ddTHH:mm:ssZ')
+$past = (Get-Date).ToUniversalTime().AddHours(-2).ToString('yyyy-MM-ddTHH:mm:ssZ')
+@"
+{
+  "blocks": [
+    { "machine": "TEST-BENCH-01", "guid": "abc-123", "username": "Steve",
+      "reason": "verification run", "since": "$past", "until": "$soon", "by": "VERIFY" },
+    { "machine": "TEST-BENCH-09", "username": "Gone",
+      "reason": "this one has run out", "since": "$past", "until": "$past", "by": "VERIFY" }
+  ]
+}
+"@ | Set-Content $blocksPath -Encoding ASCII
+
+try {
+    $b = Invoke-RestMethod -Uri "$base/launcher/blocks" -TimeoutSec 10
+    $names = @($b.blocks | ForEach-Object { $_.machine })
+    Write-Output "  blocks served: $($names -join ', ')"
+
+    Check 'a live block is served to clients' ($names -contains 'TEST-BENCH-01') ($names -join ', ')
+    Check 'the reason travels with it' (@($b.blocks | Where-Object { $_.machine -eq 'TEST-BENCH-01' }).reason -eq 'verification run') 'reason missing'
+    Check 'so does the machine identifier' (@($b.blocks | Where-Object { $_.machine -eq 'TEST-BENCH-01' }).guid -eq 'abc-123') 'guid missing'
+
+    # Expired blocks are dropped on the way out and the file rewritten, so a
+    # timed block tidies itself up without the host having to notice.
+    Check 'an expired block is not served' (-not ($names -contains 'TEST-BENCH-09')) ($names -join ', ')
+
+    $onDisk = @((Get-Content $blocksPath -Raw | ConvertFrom-Json).blocks | ForEach-Object { $_.machine })
+    Check 'and it was removed from the file too' (-not ($onDisk -contains 'TEST-BENCH-09')) ($onDisk -join ', ')
+} catch {
+    Check 'a live block is served to clients' $false $_.Exception.Message
+}
+
 Pick (ByName $w 'ADMIN')
 Start-Sleep -Seconds 1
 Pick (WaitByName $w 'FLEET')
@@ -274,6 +320,18 @@ Check 'the fleet list has rows' ($null -ne $list -and $list.FindAll([Windows.Aut
 
 Check 'the username is shown on the host' ($null -ne (ByName $w 'Steve')) 'Steve not displayed'
 Check 'and the other machine too' ($null -ne (ByName $w 'TEST-BENCH-02')) 'TEST-BENCH-02 not displayed'
+
+Check 'the fleet tab offers a way to turn playing off' ($null -ne (ById $w 'FleetBlockButton')) 'no block button'
+Check 'and a way to turn it back on' ($null -ne (ById $w 'FleetUnblockButton')) 'no unblock button'
+
+# The blocked machine checked in earlier, so its row should say so rather than
+# the block living only in a file nobody looks at.
+Check 'the blocked machine is shown as off in the list' `
+      ($summary -match 'off on 1' -or $null -ne (ByName $w 'OFF - until lifted')) $summary
+
+$fleetAgain = (ById $w 'FleetSummary').Current.Name
+Write-Output "  fleet summary: $fleetAgain"
+Check 'the summary counts how many are turned off' ($fleetAgain -match 'off on') $fleetAgain
 
 $crashTab = WaitByName $w 'CRASH REPORTS'
 Check 'the crash reports tab can be reached' ($null -ne $crashTab) 'never appeared'
@@ -302,6 +360,7 @@ Start-Sleep -Seconds 2
 
 if (Test-Path $rosterPath) { Remove-Item $rosterPath -Force }
 if (Test-Path $inboxPath)  { Remove-Item $inboxPath -Recurse -Force }
+if (Test-Path $blocksPath) { Remove-Item $blocksPath -Force }
 if (-not $hadFlag) { Remove-Item $flag -Force; Write-Output "  (removed admin.flag again)" }
 
 Write-Output ""

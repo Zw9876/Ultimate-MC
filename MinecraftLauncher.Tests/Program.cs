@@ -44,6 +44,7 @@ namespace MinecraftLauncher.Tests
                 new("deps",       false, () => Task.Run(ModDependencyTests.Run)),
                 new("backups",    false, () => Task.Run(WorldBackupTests.Run)),
                 new("fleet",      false, () => Task.Run(FleetTests.Run)),
+                new("blocks",     false, () => Task.Run(PlayBlockTests.Run)),
                 new("packs",      false, FabricPackTests.RunAsync),
                 new("serverpacks",false, FabricServerPackTests.RunAsync),
                 new("modrinth",   true,  ModrinthTests.RunAsync)

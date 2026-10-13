@@ -45,10 +45,19 @@ namespace MinecraftLauncher.Core
         /// <summary>
         /// Finds the list: the host's if one is reachable, otherwise this machine's own.
         /// </summary>
+        /// <param name="knownHost">
+        /// A host the caller has already discovered. Passing it skips the UDP probe,
+        /// which matters because PLAY pays that 1500 ms wait more than once already
+        /// (handoff section 10, item 7) and the play-block check needs the same answer.
+        /// </param>
         public static async Task<Fetched> FetchAsync(
-            AppConfig config, IProgress<string>? log, CancellationToken ct)
+            AppConfig config, IProgress<string>? log, CancellationToken ct,
+            string? knownHost = null)
         {
-            string? host = config.SkinServer?.Trim();
+            string? host = !string.IsNullOrWhiteSpace(knownHost)
+                ? knownHost!.Trim()
+                : config.SkinServer?.Trim();
+
             if (string.IsNullOrWhiteSpace(host))
             {
                 try { host = (await Task.Run(SkinDiscovery.FindRemote, ct))?.Address; }

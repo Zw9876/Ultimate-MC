@@ -61,6 +61,8 @@ $hostOnly = @(
     'crash-inbox'
     'crash-sent.txt'
     'required-mods-declined.txt'
+    'play-blocks.json'
+    'play-blocks-cache.json'
     'backups'
     'launcher_errors.txt'
     'update-watcher.log'
@@ -153,7 +155,10 @@ function Build-AdminZip {
     # the output stream, so returning ($out, $carried) would hand the caller three
     # loose objects when two mods are carried and one when none are.
     $script:carried = @()
-    foreach ($item in 'required-mods.json', 'required-mods') {
+    # play-blocks.json comes along for the same reason as the required-mods list:
+    # it is this host's own configuration, and a host rebuilt from this zip should
+    # keep it. Expired blocks drop themselves, so a stale one cannot linger.
+    foreach ($item in 'required-mods.json', 'required-mods', 'play-blocks.json') {
         $from = Join-Path $repo $item
         if (Test-Path $from) {
             Copy-Item $from $folder -Recurse
@@ -171,7 +176,8 @@ function Build-AdminZip {
     foreach ($bad in 'fleet.json', 'crash-inbox', 'crash-sent.txt',
                      'required-mods-declined.txt', 'backups',
                      'launcher_errors.txt', 'update-watcher.log',
-                     'config.txt', 'computer_uuid.dat') {
+                     'config.txt', 'computer_uuid.dat',
+                     'play-blocks-cache.json') {
         $found = Get-ChildItem $folder -Recurse -Force -Filter $bad -ErrorAction SilentlyContinue
         if ($found) { Fail "$bad is in the admin zip. It belongs to one machine; read it where it is." }
     }
