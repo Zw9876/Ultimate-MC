@@ -17,6 +17,16 @@
 # admin.flag has to be absent: the machine holding it is exempt from pauses by
 # design, which is the opposite of what is under test here.
 
+param(
+    [int]$Port = 25567,
+
+    # Path to an OLDER MinecraftLauncher.exe, from before pausing existed. When
+    # given, this also proves what such a client does with a pause -- which is
+    # nothing, and is the likeliest reason a pause looks broken on a fleet that
+    # has not finished updating. Extract a previous rollout zip to get one.
+    [string]$OldLauncher
+)
+
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 
 Add-Type -TypeDefinition @'
@@ -49,7 +59,7 @@ public static class PauseWin {
 $repo = Split-Path -Parent $PSScriptRoot
 $exe  = Join-Path $repo 'MinecraftLauncher.exe'
 $root = [Windows.Automation.AutomationElement]::RootElement
-$port = 25567
+$port = $Port
 
 if (-not (Test-Path $exe)) { Write-Output "No launcher at $exe"; exit 2 }
 
@@ -250,6 +260,72 @@ if (-not $standUp) {
     }
     Check 'the watcher then exits, releasing the exe for an update' $watcherGone `
           'the watcher is still running, so a self-update would be blocked'
+}
+
+# ---- what an OLD client does with the same pause ----
+#
+# The case that matters in the field, and the one easy to mistake for a broken
+# feature: a launcher built before pausing existed polls the same endpoint, does
+# not understand the "paused" field, and carries on. The game keeps running and
+# the host has no idea.
+
+if (-not $OldLauncher) {
+    Write-Output ''
+    Write-Output '  (no -OldLauncher given, so the version-floor case is not covered here.'
+    Write-Output '   Extract a previous rollout zip and pass its MinecraftLauncher.exe to'
+    Write-Output '   prove what an un-updated machine does with a pause.)'
+}
+elseif (-not (Test-Path $OldLauncher)) {
+    Check 'the older launcher exists' $false $OldLauncher
+}
+else {
+    $oldVersion = (Get-Item $OldLauncher).VersionInfo.FileVersion
+    Write-Output ''
+    Write-Output ("  comparing against an older client: " + $oldVersion)
+
+    $standIn2 = Join-Path $env:TEMP "mc-standin-old-$PID.ps1"
+    ($standInCode -replace 'Stand-in for Minecraft', 'Stand-in on an OLD client') |
+        Set-Content $standIn2 -Encoding ASCII
+
+    $oldStand = Start-Process powershell -PassThru -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $standIn2)
+
+    $oldUp = WaitForTitle 'Stand-in on an OLD client' 20
+    Check 'a stand-in game is running for the old client' $oldUp 'no window'
+
+    if ($oldUp) {
+        $oldWatcher = Start-Process $OldLauncher -PassThru -ArgumentList @(
+            '--watch-game', $oldStand.Id, '--host', "127.0.0.1:$port")
+
+        Write-Output ("  started the OLD watcher (pid " + $oldWatcher.Id + ") against the same paused host")
+
+        # Longer than the current watcher needed, which closed its game well
+        # inside this.
+        Start-Sleep -Seconds 25
+
+        $survived = $null -ne (Get-Process -Id $oldStand.Id -ErrorAction SilentlyContinue)
+
+        # This check PASSING means the explanation is understood, not that all is
+        # well: an old client is expected to ignore the pause.
+        Check 'an old client ignores the pause, as expected' $survived `
+              'the old client closed the game, so the version floor is not what we think'
+
+        Check 'and it shows no paused notice' `
+              (-not ([PauseWin]::AllTitles() -contains 'Playing is paused')) `
+              'it somehow showed the notice'
+
+        Write-Output ''
+        Write-Output '  SO: a machine on a build older than the pause feature plays straight'
+        Write-Output ("     through it. " + $oldVersion + " does not understand the 'paused'")
+        Write-Output '     field at all. Nothing is wrong with the host; the client needs the'
+        Write-Output '     build, and a game already running needs restarting even after it'
+        Write-Output '     updates, because its watcher is the old process.'
+
+        Stop-Process -Id $oldWatcher.Id -Force -ErrorAction SilentlyContinue
+        Stop-Process -Id $oldStand.Id -Force -ErrorAction SilentlyContinue
+    }
+
+    Remove-Item $standIn2 -Force -ErrorAction SilentlyContinue
 }
 
 # ---- and nobody can start a game while it lasts ----

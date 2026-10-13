@@ -27,7 +27,7 @@ namespace MinecraftLauncher.UI
             ("Until I let everyone back on", null)
         };
 
-        public PauseWindow(bool serving)
+        public PauseWindow(bool serving, string? reachWarning)
         {
             InitializeComponent();
 
@@ -47,6 +47,16 @@ namespace MinecraftLauncher.UI
                   "is already running will hear about this. It will still stop anyone " +
                   "STARTING Minecraft. Start the skin server (or a server) first if you " +
                   "need the games that are already open to close.";
+
+            // The thing that was missing when a pause was first used in earnest: a
+            // machine on an older launcher cannot obey one, and the host had no way
+            // to know. Said here, before the button is pressed, rather than left to
+            // be discovered by somebody still playing.
+            if (!string.IsNullOrWhiteSpace(reachWarning))
+            {
+                ReachWarning.Text = reachWarning;
+                ReachWarning.Visibility = Visibility.Visible;
+            }
 
             ReasonBox.Focus();
         }

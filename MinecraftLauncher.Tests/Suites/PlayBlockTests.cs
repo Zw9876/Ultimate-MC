@@ -46,6 +46,7 @@ namespace MinecraftLauncher.Tests
                 Caching(sandbox);
                 Pausing(sandbox);
                 PauseOnTheWire();
+                WhoCanObey();
             }
             finally
             {
@@ -421,6 +422,76 @@ namespace MinecraftLauncher.Tests
             Check("an expired pause is not announced",
                   SessionShutdown.ParsePause(spent.ToJson()) is null);
             Check("and reads as cleared on the host too", spent.CurrentPause is null);
+        }
+
+        /// <summary>A check-in, for building a roster to ask questions of.</summary>
+        private static FleetRoster.CheckIn Checked(string machine, string? launcher = null) =>
+            new() { Machine = machine, Launcher = launcher };
+
+        private static void WhoCanObey()
+        {
+            Section("telling the host who cannot obey");
+
+            // The gap this closes: a pause was turned on in earnest and somebody kept
+            // playing, because their launcher predated the feature. Measured since,
+            // side by side against one paused host: a 1.2.285.217 watcher closes its
+            // game, a 1.2.280.291 watcher ignores the same pause entirely. The
+            // mechanism was never the problem; the host having no way to know was.
+            var roster = new FleetRoster.Listing();
+            var now = DateTime.UtcNow;
+
+            FleetRoster.Merge(roster, Checked("CURRENT-1", "1.2.285.217"), null, now);
+            FleetRoster.Merge(roster, Checked("CURRENT-2", "1.2.285.145"), null, now);
+            FleetRoster.Merge(roster, Checked("OLD-ONE",   "1.2.280.291"), null, now);
+            FleetRoster.Merge(roster, Checked("ANCIENT",   "1.2.265.376"), null, now);
+            FleetRoster.Merge(roster, Checked("SILENT"),                   null, now);
+
+            var reach = PlayBlocks.CanObey(roster, PlayBlocks.PauseFloor);
+
+            Expect("every checked-in machine is counted", reach.Total, 5);
+            Expect("two are too old for a pause", reach.TooOld, 2);
+            Expect("one never said", reach.Unknown, 1);
+            Check("the old ones are named, so they can be chased",
+                  reach.Names.Contains("OLD-ONE") && reach.Names.Contains("ANCIENT"),
+                  string.Join(", ", reach.Names));
+            Check("and the current ones are not", !reach.Names.Contains("CURRENT-1"));
+
+            // Exactly on the floor counts as able: that is the build it landed in.
+            Check("a machine exactly on the floor can obey", !reach.Names.Contains("CURRENT-2"));
+
+            string? warn = reach.Warn("a pause");
+            Check("there is something to warn about", warn is not null);
+            Note(warn ?? "(nothing)");
+            Check("the warning says how many and of how many",
+                  warn!.Contains("2 of 5"), warn);
+            Check("names them", warn.Contains("OLD-ONE"), warn);
+            Check("counts the one that did not say, separately",
+                  warn.Contains("never said"), warn);
+            Check("and explains that a running game keeps its old watcher",
+                  warn.Contains("restarted"), warn);
+
+            // Blocks arrived a build before pausing, so the floors differ and a
+            // machine can obey one and not the other.
+            var blockReach = PlayBlocks.CanObey(roster, PlayBlocks.BlockFloor);
+            Check("the block floor is earlier than the pause floor",
+                  PlayBlocks.BlockFloor < PlayBlocks.PauseFloor);
+            Expect("so the same roster has fewer too old to be blocked", blockReach.TooOld, 2);
+
+            // Nothing to warn about when everybody is current - the warning must be
+            // absent rather than reassuring noise.
+            var allGood = new FleetRoster.Listing();
+            FleetRoster.Merge(allGood, Checked("A", "1.2.285.217"), null, now);
+            var fine = PlayBlocks.CanObey(allGood, PlayBlocks.PauseFloor);
+            Check("a current fleet reaches everyone", fine.Everyone);
+            Check("and says nothing at all", fine.Warn("a pause") is null);
+
+            // An empty roster is not the same as a current one, and must not read as
+            // success: it is the state the host was actually in.
+            var empty = PlayBlocks.CanObey(new FleetRoster.Listing(), PlayBlocks.PauseFloor);
+            Check("an empty roster does not read as everyone being fine",
+                  empty.Warn("a pause") is not null);
+            Check("it says no machines have checked in",
+                  empty.Warn("a pause")!.Contains("checked in"), empty.Warn("a pause"));
         }
 
         private static void Caching(string sandbox)

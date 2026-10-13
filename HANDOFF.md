@@ -518,6 +518,31 @@ including where WebView2 is loaded from — depends on it.
     anybody *starting* Minecraft but no running game hears about it, because there
     is nothing for the watchers to poll. The dialog says so rather than implying
     otherwise.
+  - **The client has to have the build, and this is what bit first.** Used in earnest
+    on 2026-10-13 and somebody kept playing. The mechanism was fine; the fleet was
+    behind. Measured side by side against one paused host, in `Verify-Pause.ps1
+    -OldLauncher`:
+
+    | Watcher | Result |
+    |---|---|
+    | 1.2.285.217 | closed its game, showed the notice |
+    | 1.2.280.291 | **played straight through, no notice** |
+
+    A launcher older than **1.2.285.145** does not know the `paused` field exists.
+    Worse, **a game already running keeps its old watcher**, so a machine that
+    updates mid-evening still ignores a pause until that game is restarted — the
+    same standing limitation already recorded for session shutdown, and it applies
+    here too.
+
+    **So the host is now told.** `PlayBlocks.CanObey` compares each checked-in
+    machine's reported build against `PauseFloor` / `BlockFloor`, and the warning
+    appears in the pause dialog *before* the button is pressed, in its confirmation,
+    and on the FLEET panel while anything is in force: *"2 of 5 are on a launcher
+    too old to obey a pause and will carry on regardless (OLD-ONE, ANCIENT)"*. A
+    machine that never reported a version is counted separately — "cannot" and
+    "cannot tell" are different answers. An empty roster warns too, rather than
+    reading as everyone being fine, because that is the state the host was actually
+    in.
 
 - **Crash reports reaching the host** (Admin tab) — clients hand their crash reports
   over so the person who fixes them does not have to walk to each machine.
@@ -1573,6 +1598,20 @@ Do not "restore fidelity" on these — the PowerShell behavior was wrong.
   (section 13). The verification script read on past it and reported empty labels.
   `launcher_errors.txt` had the answer the whole time — read it first.
 
+- **Setting a control's text and then overwriting it later in the same method.**
+  The too-old warning was *prepended* to `FleetNote.Text` a dozen lines before the
+  line that assigns `FleetNote.Text` outright, so it was computed, written and
+  silently thrown away. The symptom is indistinguishable from the warning logic not
+  working at all, which is where the time goes. Caught by `Verify-Admin.ps1`
+  asserting on the panel rather than on the function. When adding to a label, add
+  after it is assigned — or assign once.
+
+- **A PowerShell script with no `param()` block silently ignores named arguments.**
+  `Verify-Pause.ps1` had `$port` as a plain variable, so passing `-OldLauncher <path>`
+  put it in `$args`, the whole new section never ran, and the script still reported
+  18/18. A typo in an argument has to fail loudly; give every script a `param()`
+  block even when the defaults are fine.
+
 - **A scoped redirect held with `using var` lasts to the end of the method.** A test
   that redirects `Paths` into a sandbox and then calls its own "against the real
   install" section inspects the *sandbox* and passes, proving nothing. Hit
@@ -1723,7 +1762,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **784 offline checks in about 7 seconds**, and around 870 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
+`MinecraftLauncher.Tests/` — **801 offline checks in about 8 seconds**, and around 890 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
 
 ```powershell
 tools\run-tests.ps1                 # everything
@@ -1760,7 +1799,7 @@ sessions before being kept:
 | `Verify-AutoUpdate.ps1` | The whole mandatory-update path, unattended: a newer host serving, an older client nobody touches, and the client swapping itself byte-for-byte and relaunching. Needs a Debug build **and** a Release publish made at least a minute later, so the host is the newer one. |
 | `Verify-Admin.ps1` | The Admin tab end to end: that the three sub-tabs render at all (a retemplated `TabControl` can show headers over an empty panel — section 11), that a check-in and a crash report posted exactly as another machine would post them are accepted, refused when malformed, and not stored twice, and that the host's own panels then *show* them. 36/36 on 2026-10-07. Creates `admin.flag` if absent and removes it again. |
 | `Verify-Backups.ps1` | The backup buttons on both tabs, against a throwaway world placed in the real saves folder: that the zip appears, opens again, keeps `level.dat` and the region data, and leaves `session.lock` out. `-IncludeServerWorld` additionally backs up the real server world — 110 MB, 297 files, **3 s**, 69.8 MB — and keeps it. 26/26 on 2026-10-07. Also fails if anything reached `launcher_errors.txt`, since that is where an invisible `MessageBox` leaves its evidence. |
-| `Verify-Pause.ps1` | **Pausing everyone, end to end, without launching Minecraft.** Sets a pause, starts the skin server, checks the shutdown channel announces it *and not as a shutdown*, then starts a **real game watcher** pointed at a stand-in window and asserts the window is closed, that the notice shown is the one that cannot be declined, and that the watcher then exits so the exe is free for an update. Finally presses PLAY and asserts it is refused and no Java appears. Pins itself with `SKIN_SERVER=` and needs `admin.flag` absent. 18/18 on 2026-10-12. |
+| `Verify-Pause.ps1` | **Pausing everyone, end to end, without launching Minecraft.** Sets a pause, starts the skin server, checks the shutdown channel announces it *and not as a shutdown*, then starts a **real game watcher** pointed at a stand-in window and asserts the window is closed, that the notice shown is the one that cannot be declined, and that the watcher then exits so the exe is free for an update. Finally presses PLAY and asserts it is refused and no Java appears. Pins itself with `SKIN_SERVER=` and needs `admin.flag` absent. 18/18 on 2026-10-12. `-OldLauncher <exe>` additionally proves what a client from before the feature does with the same pause — nothing — which is the likeliest reason a pause looks broken on a fleet that has not finished updating. Extract a previous rollout zip to get one. 21/21 on 2026-10-13 against 1.2.280.291. |
 | `Verify-Blocks.ps1` | **The one check in the play-block feature that counts.** Plants a block for this machine in the cache, presses PLAY on a real launcher, and asserts on *behaviour*: a dialog appeared, the launcher did **not** close, and **no Java process started**. Then does it again with an expired block and asserts nothing happens. Needs `admin.flag` absent — that machine is never blocked — which is why it is not part of `Verify-Admin.ps1`. 10/10 on 2026-10-12. |
 | `Build-RolloutZip.ps1` | Builds both zips, refusing to write an update zip that contains anything host-only. See section 8. |
 | `Diagnose-MinecraftNet.ps1` | Why Minecraft cannot reach the internet on a machine — see section 10. |

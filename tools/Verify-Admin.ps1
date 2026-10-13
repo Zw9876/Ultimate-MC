@@ -406,6 +406,16 @@ Check 'and a way to turn it back on' ($null -ne (ById $w 'FleetUnblockButton')) 
 Check 'the blocked machine is shown as off in the list' `
       ($summary -match 'off on 1' -or $null -ne (ByName $w 'OFF - until lifted')) $summary
 
+# Both planted machines (1.2.265.376 and 1.2.280.260) predate play blocks, and
+# one of them is blocked -- so the panel must say the block cannot reach it.
+# A restriction that silently reaches nobody is worse than none, because it is
+# trusted; that is exactly how a pause looked broken in the field.
+$fleetNote = (ById $w 'FleetNote').Current.Name
+Write-Output ("  fleet note: " + $fleetNote.Substring(0, [Math]::Min(150, $fleetNote.Length)))
+Check 'the panel warns that machines are too old to obey a block' `
+      ($fleetNote -match 'too old to obey') $fleetNote
+Check 'and names one of them' ($fleetNote -match 'TEST-BENCH-0') $fleetNote
+
 $fleetAgain = (ById $w 'FleetSummary').Current.Name
 Write-Output "  fleet summary: $fleetAgain"
 Check 'the summary counts how many are turned off' ($fleetAgain -match 'off on') $fleetAgain

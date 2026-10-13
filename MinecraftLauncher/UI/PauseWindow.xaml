@@ -40,6 +40,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Text="REASON" Style="{StaticResource SectionLabel}"/>
@@ -54,6 +55,13 @@
                 <TextBlock Grid.Row="3" x:Name="ServingNote" Margin="0,12,0,0"
                            FontSize="11" TextWrapping="Wrap"
                            Foreground="{StaticResource MutedBrush}"/>
+
+                <!-- Only appears when some machine cannot obey a pause. Accent
+                     coloured because it changes what pressing the button achieves. -->
+                <TextBlock Grid.Row="4" x:Name="ReachWarning" Margin="0,10,0,0"
+                           FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap"
+                           Visibility="Collapsed"
+                           Foreground="{StaticResource AccentBrush}"/>
             </Grid>
         </Border>
 

@@ -121,8 +121,8 @@ beside the exe and finds nothing.
   compiled fine and failed at run time — a wrong Java version, a silently
   misdirected installer, a profile the scanner could not see. Launch it, drive the
   UI, read the server output.
-- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 784 offline checks in about 7
-  seconds, exit code 0 when clean; around 870 with the network suite, which moves
+- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 801 offline checks in about 8
+  seconds, exit code 0 when clean; around 890 with the network suite, which moves
   with the live Modrinth API. `-Offline` skips the network suite. Piped
   anywhere it prints only failures and the count — `-ShowAll` for a line per check.
   Add to `MinecraftLauncher.Tests/Suites/` as work lands — and write the checks against

@@ -1109,6 +1109,20 @@ namespace MinecraftLauncher.UI
                 $"Each launcher tells this host its computer name, the build it is running and " +
                 $"the name it last played under. Kept in {FleetRoster.FilePath}. {serving}";
 
+            // Appended AFTER FleetNote is assigned above, not before: prepending to it
+            // first put the warning somewhere that the next line overwrote, which is
+            // the kind of thing that looks like the warning logic not working.
+            //
+            // A restriction that silently reaches nobody is worse than none, because it
+            // is trusted — which is exactly how a pause came to look broken.
+            string? cannot = pause is not null
+                ? PlayBlocks.CanObey(listing, PlayBlocks.PauseFloor).Warn("a pause")
+                : off > 0
+                    ? PlayBlocks.CanObey(listing, PlayBlocks.BlockFloor).Warn("being blocked")
+                    : null;
+
+            if (cannot is not null) FleetNote.Text = cannot + "  " + FleetNote.Text;
+
             FleetForgetButton.IsEnabled = listing.Machines.Count > 0;
         }
 
@@ -1290,7 +1304,12 @@ namespace MinecraftLauncher.UI
             }
 
             bool serving = _skinServer?.IsRunning == true;
-            var dialog = new PauseWindow(serving) { Owner = this };
+
+            // Who can actually act on this, asked before it is set rather than
+            // discovered afterwards by somebody still playing.
+            var reach = PlayBlocks.CanObey(FleetRoster.Load(), PlayBlocks.PauseFloor);
+
+            var dialog = new PauseWindow(serving, reach.Warn("a pause")) { Owner = this };
 
             if (dialog.ShowDialog() != true || dialog.Result is null) return;
             var choice = dialog.Result;
@@ -1306,12 +1325,13 @@ namespace MinecraftLauncher.UI
 
             _skinServer?.Shutdown.SetPause(pause);
 
-            FleetStatus.Text = serving
+            FleetStatus.Text = (serving
                 ? $"Everyone is paused ({pause.UntilText}). Games already running close " +
                   "within a second or two."
                 : $"Everyone is paused ({pause.UntilText}), but nothing is being served " +
                   "from here — so nobody can START Minecraft, and any game already " +
-                  "running carries on. Start the skin server to close those too.";
+                  "running carries on. Start the skin server to close those too.")
+                + (reach.Warn("a pause") is { } caveat ? "  " + caveat : "");
 
             RefreshFleet();
         }

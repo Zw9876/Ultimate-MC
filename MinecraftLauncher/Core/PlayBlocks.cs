@@ -38,6 +38,81 @@ namespace MinecraftLauncher.Core
         /// <summary>Where a client asks whether it is blocked.</summary>
         public const string Endpoint = "/launcher/blocks";
 
+        /// <summary>
+        /// The builds in which a client first understood each of these, so the host can
+        /// be told when a machine cannot possibly obey.
+        /// </summary>
+        /// <remarks>
+        /// Added after a pause was turned on in earnest and somebody kept playing. The
+        /// mechanism was fine — measured side by side, a 1.2.285.217 watcher closes its
+        /// game and a 1.2.280.291 watcher ignores the same pause entirely, because the
+        /// field did not exist yet. What was missing was any way for the host to know
+        /// that, so the button looked broken when the fleet was simply behind.
+        ///
+        /// A silent no-op is the worst outcome available here: somebody trusting a pause
+        /// while a machine plays on is worse than being told the pause cannot reach it.
+        /// </remarks>
+        public static readonly Version PauseFloor = new(1, 2, 285, 145);
+
+        /// <inheritdoc cref="PauseFloor"/>
+        public static readonly Version BlockFloor = new(1, 2, 285, 114);
+
+        /// <summary>How much of the fleet can act on something, and how much cannot.</summary>
+        public sealed record Reach(int Total, int TooOld, int Unknown, List<string> Names)
+        {
+            public bool Everyone => TooOld == 0 && Unknown == 0;
+
+            /// <summary>
+            /// A sentence for the host, or null when there is nothing to warn about.
+            /// </summary>
+            public string? Warn(string what)
+            {
+                if (Total == 0)
+                    return "No machines have checked in yet, so there is no way to tell " +
+                           $"who can act on {what}. A machine only appears once somebody " +
+                           "opens their launcher while this host is serving.";
+
+                if (Everyone) return null;
+
+                var parts = new List<string>();
+
+                if (TooOld > 0)
+                    parts.Add($"{TooOld} of {Total} are on a launcher too old to obey " +
+                              $"{what} and will carry on regardless ({string.Join(", ", Names)})");
+
+                if (Unknown > 0)
+                    parts.Add($"{Unknown} never said which build they run");
+
+                return string.Join("; ", parts) +
+                       ". They update themselves once they see this host, but a game " +
+                       "already running keeps its old watcher until it is restarted.";
+            }
+        }
+
+        /// <summary>
+        /// Which checked-in machines are too far behind to act on something.
+        /// </summary>
+        /// <remarks>
+        /// A machine reporting no version at all is counted apart from one reporting an
+        /// old one: "cannot" and "cannot tell" are different answers, and only one of
+        /// them is worth naming names over.
+        /// </remarks>
+        public static Reach CanObey(FleetRoster.Listing roster, Version floor)
+        {
+            var none = new Version(0, 0, 0, 0);
+
+            int unknown = 0;
+            var behind = new List<string>();
+
+            foreach (var machine in roster.Machines)
+            {
+                if (machine.Version == none) { unknown++; continue; }
+                if (machine.Version < floor) behind.Add(machine.Name);
+            }
+
+            return new Reach(roster.Machines.Count, behind.Count, unknown, behind);
+        }
+
         /// <summary>The host's master copy, beside the launcher.</summary>
         public static string FilePath => Path.Combine(Paths.BaseDir, "play-blocks.json");
 
