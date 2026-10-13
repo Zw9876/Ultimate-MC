@@ -11,8 +11,8 @@ The C# launcher (`MinecraftLauncher/`, .NET 10 WPF) is **complete and shipping**
 The whole PowerShell feature set is ported plus a good deal more;
 `MinecraftLauncher-Standalone.ps1` is now only a behavioural reference.
 
-**Current build: 1.2.285.217** (2026-10-12) at the repo root. **The rollout zip has
-not been rebuilt for it** and is still on 1.2.280.291. Build both zips with
+**Current build: 1.2.285.217** (2026-10-12), at the repo root and in the rollout zip
+(56.3 MB, launcher verified byte-for-byte inside it). Build both zips with
 `tools\Build-RolloutZip.ps1` rather than by hand — it refuses to write an update zip
 containing anything host-only. Updates are mandatory and self-installing, so in
 principle one copy onto the host carries the fleet.

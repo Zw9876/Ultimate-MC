@@ -1014,10 +1014,11 @@ committed here is world-readable the moment it is pushed.
 
 ## 10. Next tasks
 
-The port is complete and shipping. Current build at the repo root: **1.2.285.114**.
-**The rollout zip is still on 1.2.280.291** — rebuild it with
-`tools\Build-RolloutZip.ps1`, which also writes `Minecraft-Launcher-Admin.zip` for
-the host-only side. That one **goes to nobody** — section 8.
+The port is complete and shipping. Current build at the repo root **and in the
+rollout zip**: **1.2.285.217**, built 2026-10-12 by `tools\Build-RolloutZip.ps1`
+(56.3 MB, launcher verified byte-for-byte inside it).
+`Minecraft-Launcher-Admin.zip` holds the host-only side and **goes to nobody** —
+section 8.
 
 **This build has to reach the host by hand.** Updates are mandatory and
 self-installing (section 5), so once the host serves the current build every machine that
@@ -1099,11 +1100,32 @@ What is genuinely outstanding:
    section 14 and has not changed: border first, generate past it afterwards, widen
    only into finished terrain.
 
-3. **Get the other machines onto Fabric loader 0.19.5.** This machine was updated
-   on 2026-09-23; the rest are on whatever they had. Nothing installed needs it —
-   all 121 mods here are satisfied by their loaders — so this is housekeeping, not
-   urgent. Mods tab → **Update loader…** → **MAKE A PACK** here, carry the zip
-   across, **OPEN A PACK** there.
+3. **Get the other machines onto Fabric loader 0.19.5** — **now automatic, and no
+   longer a manual job.** Section 5: the host pins a loader and every machine
+   catches up when its launcher next opens. Pinned and switched on here on
+   2026-10-12, so this closes itself as the build reaches the fleet.
+
+   **Done on this host, for real.** Its *server* was found to be on **0.19.3**
+   while its client was on 0.19.5 — exactly the drift this was about, and it had
+   gone unnoticed because the libraries folder keeps every loader a server has
+   ever had and so reads as current when it is not. Upgraded through the Admin tab
+   and then proved by starting the server:
+
+   ```
+   [23:36:10] Loading Minecraft 26.1.2 with Fabric Loader 0.19.5
+   [23:36:30] Done (1.288s)! For help, type "help"
+   [23:38:36] Stopping server / Saving players / Saving worlds
+   ```
+
+   Worth knowing for next time: a server's loader change leaves the **new loader's
+   libraries absent** until its next start, which fetches them — so the first start
+   after an upgrade needs internet, and took about 20 seconds here against 1.3
+   normally. `server.jar` is the authoritative record of what a server will start
+   on; the libraries folder is not.
+
+   The manual route still exists for a machine that cannot reach Fabric: Mods tab →
+   **Update loader…** → **MAKE A PACK** here, carry the zip across, **OPEN A PACK**
+   there.
 
 4. **One two-machine test still pending:** discovery preferring a *remote* skin
    server over a local one. It cannot be exercised on this box — a host here reads

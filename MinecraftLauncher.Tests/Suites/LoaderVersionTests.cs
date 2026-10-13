@@ -41,7 +41,15 @@ namespace MinecraftLauncher.Tests
             // code paths reading the same folder.
             string installed = FabricLoaderUpdate.InstalledLoaders("26.1.2").FirstOrDefault() ?? "(none)";
             Detect("client 26.1.2 fabric", "26.1.2", false, "Fabric", installed);
-            Detect("server 26.1.2 fabric", "26.1.2", true, "Fabric", "0.19.3");
+
+            // The server was a literal 0.19.3 one line below that comment, and it broke
+            // the first time the loader moved — on 2026-10-12, when the new loader policy
+            // upgraded this host's server to 0.19.5. Loader updates are automatic now, so
+            // the server's version changes by itself as well. Derived the same way, from
+            // the jar rather than from the detector, so the check still has teeth: two
+            // different code paths have to agree about the same server.
+            string onServer = FabricServerLoader.InstalledVersion("26.1.2") ?? "(none)";
+            Detect("server 26.1.2 fabric", "26.1.2", true, "Fabric", onServer);
             Detect("client 1.20.1 forge", "1.20.1", false, "Forge", "47.4.10");
 
             // The server's folder is "<mc>-<forge>"; only the second half is the loader.

@@ -82,7 +82,67 @@ READ THIS FIRST: ONLY ONE COMPUTER NEEDS THIS FILE
     If a machine is ever out of date, that file says why.
 
 ================================================================
-2. NEW IN THIS BUILD: BACK UP YOUR WORLDS
+2. NEW IN THIS BUILD: THE HOST CAN PAUSE EVERYONE
+================================================================
+
+  IF YOUR MINECRAFT CLOSES BY ITSELF, IT IS PROBABLY THIS. IT IS NOT
+  A CRASH AND NOTHING IS LOST.
+
+  Whoever is hosting can now close everyone's Minecraft at once and
+  stop it being started again for a while. It is for when they need
+  the games shut to get something done - updating all the launchers,
+  or working on the server.
+
+  WHAT YOU WILL SEE
+    A window saying playing is paused, and your game closing on its
+    own a second or two later. There is no countdown and no button to
+    stay in: that is deliberate, because the whole point is to get
+    Minecraft out of the way.
+
+  NOTHING YOU WERE DOING IS LOST
+    The game is closed the normal way, exactly as if you clicked its X.
+    A single-player world is saved first, and a server is left cleanly.
+    It is not killed.
+
+  WHEN IT COMES BACK
+    The window tells you, and usually it is a few minutes. Open the
+    launcher again and press PLAY as normal. If it is still paused the
+    launcher says so, and says why, rather than just refusing.
+
+  ONE COMPUTER AT A TIME, TOO
+    The host can also turn playing off on a single computer - if
+    somebody has done something on the server they should not have.
+    That one says who to talk to. It is not a secret and it is not
+    permanent: it can be set to lift itself after a while, and the host
+    can lift it at any time.
+
+================================================================
+3. ALSO NEW: THE FABRIC LOADER KEEPS ITSELF UP TO DATE
+================================================================
+
+  You do not have to do anything, and nothing is being added to your
+  game.
+
+  The host picks one Fabric loader version for everyone, and your
+  launcher quietly installs it the next time you open it. That is all
+  this does. It is the same thing the Mods tab's "Update loader..."
+  always did, done for you so the machines stop drifting apart.
+
+  WHAT IT WILL NOT DO
+    It only ever updates a Minecraft version that ALREADY uses Fabric.
+    If you play a version on Vanilla or on Forge, nothing is installed
+    into it - no Fabric profile appears in your version list that was
+    not there before.
+
+    It never puts you on an OLDER loader than you already have.
+
+    Your mods are not touched. Updating mods automatically is a good way
+    to break a game - one mod wanting a newer version of another is
+    exactly how installs stop starting - so that is still yours to do
+    from the Mods tab when you want it.
+
+================================================================
+4. BACK UP YOUR WORLDS
 ================================================================
 
   Client tab -> "Back up worlds..."     (your single-player worlds)
@@ -115,7 +175,7 @@ READ THIS FIRST: ONLY ONE COMPUTER NEEDS THIS FILE
   For reference: a 110 MB world took 3 seconds and came out at 70 MB.
 
 ================================================================
-3. ALSO NEW: TWO THINGS YOUR COMPUTER NOW TELLS THE HOST
+5. TWO THINGS YOUR COMPUTER TELLS THE HOST
 ================================================================
 
   Both of these happen on their own, over your own network, between
@@ -152,7 +212,7 @@ READ THIS FIRST: ONLY ONE COMPUTER NEEDS THIS FILE
   waiting except crash reports, which go the next time a host is there.
 
 ================================================================
-4. UPDATING THE FABRIC LOADER WITHOUT REINSTALLING
+6. UPDATING THE FABRIC LOADER YOURSELF
 ================================================================
 
   Mods tab -> "Update loader..."
@@ -189,7 +249,7 @@ READ THIS FIRST: ONLY ONE COMPUTER NEEDS THIS FILE
   version when it is first installed and cannot be swapped afterwards.
 
 ================================================================
-5. GETTING MODS WITHOUT A USB STICK
+7. GETTING MODS WITHOUT A USB STICK
 ================================================================
 
   These computers cannot reach Minecraft's own servers, but they CAN
@@ -219,7 +279,7 @@ READ THIS FIRST: ONLY ONE COMPUTER NEEDS THIS FILE
     "up to date" - those are different answers and only one is honest.
 
 ================================================================
-6. MODS ARE CHECKED AGAINST YOUR LOADER
+8. MODS ARE CHECKED AGAINST YOUR LOADER
 ================================================================
 
   WRONG LOADER. All the mods for one Minecraft version share a folder,
@@ -242,7 +302,7 @@ READ THIS FIRST: ONLY ONE COMPUTER NEEDS THIS FILE
     Anything switched on is never touched.
 
 ================================================================
-7. MODS THE HOST ASKS EVERYONE TO HAVE
+9. MODS THE HOST ASKS EVERYONE TO HAVE
 ================================================================
 
   When you press PLAY, your launcher checks whether the host wants any
@@ -263,7 +323,7 @@ READ THIS FIRST: ONLY ONE COMPUTER NEEDS THIS FILE
   nothing is re-enabled behind your back.
 
 ================================================================
-8. WHY DID THE GAME CLOSE?
+10. WHY DID THE GAME CLOSE?
 ================================================================
 
   Client tab -> "Crash reports..."
@@ -279,13 +339,14 @@ READ THIS FIRST: ONLY ONE COMPUTER NEEDS THIS FILE
              Currently, supermartijn642configlib is not installed
 
   The whole report is underneath, with a button to copy it. Nothing is
-  deleted - the reports stay where the game put them.
+  deleted - the reports stay where the game put them, and a copy goes to
+  the host so they can read it without coming over (section 5).
 
   Forge and NeoForge name the mod that failed. Fabric does not, so for a
   Fabric crash it shows the error but will not guess at a culprit.
 
 ================================================================
-9. RUNNING A SERVER
+11. RUNNING A SERVER
 ================================================================
 
   PRE-GENERATE THE WORLD (Server console -> PRE-GENERATE)
@@ -294,7 +355,7 @@ READ THIS FIRST: ONLY ONE COMPUTER NEEDS THIS FILE
     how long and how much disk before starting. People can keep playing
     while it runs.
 
-    TAKE A BACKUP FIRST - section 2.
+    TAKE A BACKUP FIRST - section 4.
 
     Set the border FIRST to land that already exists, keep generating
     past it, and only widen into finished ground. Making a border
