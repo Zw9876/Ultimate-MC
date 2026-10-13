@@ -87,9 +87,12 @@ Start-Sleep -Seconds 3
 $rosterPath = Join-Path $repo 'fleet.json'
 $inboxPath  = Join-Path $repo 'crash-inbox'
 $blocksPath = Join-Path $repo 'play-blocks.json'
+$policyPath = Join-Path $repo 'loader-policy.json'
 if (Test-Path $rosterPath) { Remove-Item $rosterPath -Force }
 if (Test-Path $inboxPath)  { Remove-Item $inboxPath -Recurse -Force }
 if (Test-Path $blocksPath) { Remove-Item $blocksPath -Force }
+$hadPolicy = Test-Path $policyPath
+if ($hadPolicy) { Move-Item $policyPath "$policyPath.verify-backup" -Force }
 
 $p = Start-Process $exe -PassThru
 Start-Sleep -Seconds 16
@@ -303,6 +306,20 @@ try {
     Check 'a live block is served to clients' $false $_.Exception.Message
 }
 
+# ---- the Fabric loader policy ----------------------------------
+
+try {
+    $lp = Invoke-RestMethod -Uri "$base/launcher/loaders" -TimeoutSec 10
+    Check 'the loader policy endpoint answers' $true ''
+
+    # Off and empty to begin with: publishing a build must never be able to start
+    # installing loaders on twenty machines because a default was wrong.
+    Check 'it starts switched off' ($lp.enabled -ne $true) ($lp | ConvertTo-Json -Compress)
+    Check 'and with nothing pinned' (@($lp.targets).Count -eq 0) (@($lp.targets).Count)
+} catch {
+    Check 'the loader policy endpoint answers' $false $_.Exception.Message
+}
+
 Pick (ByName $w 'ADMIN')
 Start-Sleep -Seconds 1
 Pick (WaitByName $w 'FLEET')
@@ -320,6 +337,66 @@ Check 'the fleet list has rows' ($null -ne $list -and $list.FindAll([Windows.Aut
 
 Check 'the username is shown on the host' ($null -ne (ByName $w 'Steve')) 'Steve not displayed'
 Check 'and the other machine too' ($null -ne (ByName $w 'TEST-BENCH-02')) 'TEST-BENCH-02 not displayed'
+
+# ---- CHECK FABRIC, for real, against Fabric's own servers ----
+#
+# Pressed with "Keep everyone on it" left OFF on purpose. That resolves and pins
+# the latest loader but installs nothing, so this verifies the whole host-side
+# path without changing what is actually installed on this machine.
+$loaderBtn = ById $w 'LoaderCheckButton'
+Check 'the fleet tab offers a Fabric loader check' ($null -ne $loaderBtn) 'no CHECK FABRIC button'
+
+if ($loaderBtn) {
+    $before = (ById $w 'LoaderPolicySummary').Current.Name
+    Write-Output "  before: $before"
+
+    Click $loaderBtn
+
+    $pinned = $false
+    for ($i = 0; $i -lt 60; $i++) {
+        Start-Sleep -Milliseconds 500
+        $st = (ById $w 'LoaderPolicyStatus').Current.Name
+        if ($st -match 'latest is|could not|Nothing to pin|Gave up') { $pinned = $true; break }
+    }
+
+    $status = (ById $w 'LoaderPolicyStatus').Current.Name
+    Write-Output "  status: $status"
+    Check 'it answers rather than hanging' $pinned $status
+
+    # Reached Fabric and pinned something. If Fabric is unreachable from the
+    # build machine this will fail honestly rather than look like a pass.
+    Check 'it reached Fabric and pinned a version' ($status -match 'latest is') $status
+
+    if (Test-Path $policyPath) {
+        $pol = Get-Content $policyPath -Raw | ConvertFrom-Json
+        $targets = @($pol.targets)
+        Write-Output ("  pinned: " + (($targets | ForEach-Object { "$($_.minecraft) -> $($_.loader)" }) -join ', '))
+
+        Check 'a policy file was written' ($targets.Count -ge 1) $targets.Count
+        Check 'and it is still switched off, so nothing was installed' ($pol.enabled -ne $true) $pol.enabled
+
+        # Only versions that already have Fabric. 1.20.1 here is Vanilla + Forge
+        # and must never gain a Fabric target.
+        $mcs = @($targets | ForEach-Object { $_.minecraft })
+        Check 'it pinned the version that has Fabric' ($mcs -contains '26.1.2') ($mcs -join ', ')
+        Check 'and NOT the Forge-only one' (-not ($mcs -contains '1.20.1')) ($mcs -join ', ')
+
+        $t = $targets | Where-Object { $_.minecraft -eq '26.1.2' } | Select-Object -First 1
+        Check 'the pinned loader looks like a version' ($t.loader -match '^\d+\.\d+') $t.loader
+        Check 'and it is marked for client and server' (($t.client -eq $true) -and ($t.server -eq $true)) `
+              "client=$($t.client) server=$($t.server)"
+
+        # Served to clients, which is the point of pinning it here.
+        try {
+            $lp2 = Invoke-RestMethod -Uri "$base/launcher/loaders" -TimeoutSec 10
+            Check 'the pinned version is served to clients' (@($lp2.targets).Count -ge 1) (@($lp2.targets).Count)
+        } catch {
+            Check 'the pinned version is served to clients' $false $_.Exception.Message
+        }
+    } else {
+        Check 'a policy file was written' $false 'loader-policy.json not created'
+    }
+}
 
 Check 'the fleet tab offers a way to turn playing off' ($null -ne (ById $w 'FleetBlockButton')) 'no block button'
 Check 'and a way to turn it back on' ($null -ne (ById $w 'FleetUnblockButton')) 'no unblock button'
@@ -361,6 +438,8 @@ Start-Sleep -Seconds 2
 if (Test-Path $rosterPath) { Remove-Item $rosterPath -Force }
 if (Test-Path $inboxPath)  { Remove-Item $inboxPath -Recurse -Force }
 if (Test-Path $blocksPath) { Remove-Item $blocksPath -Force }
+Remove-Item $policyPath -Force -ErrorAction SilentlyContinue
+if ($hadPolicy) { Move-Item "$policyPath.verify-backup" $policyPath -Force }
 if (-not $hadFlag) { Remove-Item $flag -Force; Write-Output "  (removed admin.flag again)" }
 
 Write-Output ""

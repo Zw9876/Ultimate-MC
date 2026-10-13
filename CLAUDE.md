@@ -11,7 +11,7 @@ The C# launcher (`MinecraftLauncher/`, .NET 10 WPF) is **complete and shipping**
 The whole PowerShell feature set is ported plus a good deal more;
 `MinecraftLauncher-Standalone.ps1` is now only a behavioural reference.
 
-**Current build: 1.2.285.145** (2026-10-12) at the repo root. **The rollout zip has
+**Current build: 1.2.285.217** (2026-10-12) at the repo root. **The rollout zip has
 not been rebuilt for it** and is still on 1.2.280.291. Build both zips with
 `tools\Build-RolloutZip.ps1` rather than by hand — it refuses to write an update zip
 containing anything host-only. Updates are mandatory and self-installing, so in
@@ -38,8 +38,8 @@ section 5 — read it there rather than expecting a summary here.
 Built and tested here but **never run on the real machines**: the crash report
 viewer, mod update checking against Modrinth, "Delete disabled", Fabric loader
 packs for servers, required mods, world backups, the fleet list, crash reports
-reaching the host, and — new on 2026-10-12 — turning playing off for one machine
-and pausing everyone at once. They are covered by tests and by
+reaching the host, and — new on 2026-10-12 — turning playing off for one machine,
+pausing everyone at once, and keeping everyone's Fabric loader on a pinned version. They are covered by tests and by
 driving the real UI; they have not met twenty machines and a Friday evening. Also
 section 5.
 
@@ -121,8 +121,8 @@ beside the exe and finds nothing.
   compiled fine and failed at run time — a wrong Java version, a silently
   misdirected installer, a profile the scanner could not see. Launch it, drive the
   UI, read the server output.
-- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 737 offline checks in about 7
-  seconds, exit code 0 when clean; around 820 with the network suite, which moves
+- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 784 offline checks in about 7
+  seconds, exit code 0 when clean; around 870 with the network suite, which moves
   with the live Modrinth API. `-Offline` skips the network suite. Piped
   anywhere it prints only failures and the count — `-ShowAll` for a line per check.
   Add to `MinecraftLauncher.Tests/Suites/` as work lands — and write the checks against

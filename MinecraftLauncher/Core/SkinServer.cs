@@ -407,6 +407,10 @@ namespace MinecraftLauncher.Core
             {
                 await HandlePlayBlocksAsync(stream, ct);
             }
+            else if (isGet && path == LoaderPolicy.Endpoint)
+            {
+                await HandleLoaderPolicyAsync(stream, ct);
+            }
             else if (isPost && path == CrashInbox.Endpoint)
             {
                 await HandleCrashReportAsync(stream, request, ct);
@@ -678,6 +682,31 @@ namespace MinecraftLauncher.Core
             {
                 Log?.Invoke($"Check-in from {remote ?? "somewhere"} failed: {ex.Message}");
                 await SendJsonAsync(stream, 500, """{"error":"could not record it"}""", ct);
+            }
+        }
+
+        /// <summary>
+        /// Tells a client which Fabric loader it should be on, per Minecraft version.
+        /// </summary>
+        /// <remarks>
+        /// The pinned versions, not an instruction to install: the client decides
+        /// whether any of it applies to what it actually has, and installs nothing for
+        /// a Minecraft version it has no Fabric loader for.
+        ///
+        /// Read from disk per request, like the other two lists, so the Admin tab and
+        /// what clients are told cannot drift apart.
+        /// </remarks>
+        private async Task HandleLoaderPolicyAsync(NetworkStream stream, CancellationToken ct)
+        {
+            try
+            {
+                var policy = LoaderPolicy.LoadLocal();
+                await SendJsonAsync(stream, 200, LoaderPolicy.ToJson(policy), ct);
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"Loader policy failed: {ex.Message}");
+                await SendJsonAsync(stream, 500, """{"enabled":false,"targets":[]}""", ct);
             }
         }
 

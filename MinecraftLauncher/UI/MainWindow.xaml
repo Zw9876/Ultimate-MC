@@ -982,6 +982,7 @@
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
@@ -995,7 +996,44 @@
                                            FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
                             </StackPanel>
 
-                            <Border Grid.Row="1" Style="{StaticResource Card}" Padding="2">
+                            <!-- == FABRIC LOADER ==
+                                 The host pins a version and every machine catches up
+                                 to it when its launcher next opens. Pinning here
+                                 rather than letting each machine ask Fabric for "the
+                                 latest" is what keeps them all on the same one. -->
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,12"
+                                    VerticalAlignment="Bottom">
+                                <StackPanel>
+                                    <TextBlock Text="FABRIC LOADER FOR EVERYONE"
+                                               Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock x:Name="LoaderPolicySummary" FontSize="12"
+                                               TextWrapping="Wrap" Margin="0,2,0,6"
+                                               Foreground="{StaticResource TextBrush}"/>
+                                    <TextBlock x:Name="LoaderPolicyNote" FontSize="11"
+                                               TextWrapping="Wrap" Margin="0,0,0,10"
+                                               Foreground="{StaticResource MutedBrush}"/>
+
+                                    <StackPanel Orientation="Horizontal">
+                                        <CheckBox x:Name="LoaderPolicyEnabled" Height="32"
+                                                  VerticalContentAlignment="Center"
+                                                  Foreground="{StaticResource TextBrush}"
+                                                  Content="Keep everyone on it"
+                                                  Checked="LoaderPolicyEnabled_Changed"
+                                                  Unchecked="LoaderPolicyEnabled_Changed"
+                                                  Margin="0,0,16,0"
+                                                  ToolTip="Each machine catches up the next time its launcher opens. Only for Minecraft versions that already have a Fabric loader there."/>
+                                        <Button x:Name="LoaderCheckButton" Content="CHECK FABRIC"
+                                                Width="150" Height="32" Margin="0,0,8,0"
+                                                Click="LoaderCheck_Click" Style="{StaticResource AccentButton}"
+                                                ToolTip="Asks Fabric for the newest loader for every Minecraft version this host has Fabric on, and pins it"/>
+                                        <TextBlock x:Name="LoaderPolicyStatus" VerticalAlignment="Center"
+                                                   Margin="4,0,0,0" FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{StaticResource MutedBrush}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="2" Style="{StaticResource Card}" Padding="2">
                                 <ListView x:Name="FleetList" BorderThickness="0" Background="Transparent">
                                     <ListView.View>
                                         <GridView>
@@ -1018,7 +1056,7 @@
                                 </ListView>
                             </Border>
 
-                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                            <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,12,0,0">
                                 <Button x:Name="FleetRefreshButton" Content="Refresh" Width="100" Height="32"
                                         Margin="0,0,8,0" Click="FleetRefresh_Click"
                                         Style="{StaticResource PlainButton}"/>

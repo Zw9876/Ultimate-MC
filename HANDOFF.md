@@ -435,6 +435,47 @@ including where WebView2 is loaded from — depends on it.
     added a third 1500 ms UDP wait to a launch that already paid two — part of section
     10 item 7.
 
+- **Keeping everyone's Fabric loader current** (Admin tab -> FLEET -> CHECK FABRIC)
+  — added 2026-10-12. The host pins a loader version per Minecraft version, and every
+  machine catches up to it the next time its launcher opens, clients and servers
+  alike. `Core/LoaderPolicy.cs`, `Core/LoaderPolicyClient.cs`,
+  `GET /launcher/loaders`.
+
+  - **The host pins; clients install that exact version.** The obvious alternative —
+    each machine asking Fabric for "the latest" as it happens to start — is how a
+    fleet ends up on several loaders, because a release landing between two machines
+    opening is enough to split them. Same reasoning as resolving required mods on the
+    machine with internet rather than per client.
+  - **Only Minecraft versions that already have a Fabric loader**, on the host when
+    pinning and on each client when installing. It keeps Fabric current; it does not
+    put Fabric anywhere new. Mods for one version share a folder whatever loader they
+    are for, so a Fabric profile appearing beside somebody's Forge mods is a crash
+    waiting for whoever picks it. Verified against this machine: `26.1.2` is pinned,
+    `1.20.1` (Vanilla + Forge) is left alone.
+  - **It never downgrades.** A machine ahead of a stale pin is left alone. Compared
+    with `MavenVersion`, not as text — `0.19.10` is newer than `0.19.5` and sorts
+    before it, which as a string comparison would read an upgrade as a downgrade.
+  - **Off by default, and a corrupt policy reads as off.** Publishing a build must
+    never be able to start installing loaders on twenty machines because a default was
+    wrong.
+  - **Deferred until no launcher update is pending.** An update swaps this exe and
+    restarts, so installing a loader through it would be cut off part-way. The loader
+    is checked again on the next start, so nothing is lost by waiting.
+  - **Clients fetch the loader from Fabric themselves.** The host pins the *version*,
+    which is what holds the fleet together; the bytes come from `meta.fabricmc.net`
+    and `maven.fabricmc.net` — both now probed by `tools\Test-DownloadHosts.ps1`,
+    because if they are blocked on the machines this has to go through a host-served
+    pack instead. The `MAKE A PACK` machinery for that already exists; it has not been
+    wired to this, deliberately, until the probe says it is needed.
+  - **Mod updating was considered and left out.** Asked for and then withdrawn in the
+    same breath, correctly: the dependency work already showed why. Every machine had
+    `fabric-api 0.152.1` while a mod needed `>= 0.154.2`, and bulk-updating mods is how
+    that becomes twenty broken installs instead of one. Deleting disabled jars
+    automatically has the same problem — a disabled jar is somebody's decision.
+  - **Found while testing:** this host's client is on `0.19.5` and its *server* on
+    `0.19.3`, which is exactly the drift this closes and the substance of section 10
+    item 3.
+
 - **Pausing everyone at once** (Admin tab -> FLEET -> PAUSE EVERYONE) — added
   2026-10-12. Closes every running game on the network within a second or two and
   stops anybody starting one, until it is lifted or its time runs out. For server
@@ -931,6 +972,8 @@ and a zip built from a working folder will pick them up:
 | `crash-inbox\` | Other people's crash reports. |
 | `crash-sent.txt`, `required-mods-declined.txt`, `play-blocks-cache.json` | Per-machine bookkeeping. Shipping one makes every machine think it has already sent its crashes, already declined a mod, or — worst of the three — that it is blocked from playing. |
 | `play-blocks.json` | The host's list of machines playing is turned off for. On a client it would be ignored, but it is nobody else's business. Carried in the **admin** zip, like the required-mods list. |
+| `loader-policy.json` | Which Fabric loader the host wants everyone on. Harmless on a client but meaningless there, since a client is told it by the host. Carried in the **admin** zip. |
+| `loader-policy-cache.json` | One machine's note of the last policy it was told. Per-machine. |
 | `backups\` | World zips. The one that matters is 70 MB, and the zip is meant to be 56. |
 | `config.txt`, `computer_uuid.dat` | Covered above too, and enforced by the same list in the build script. |
 | `launcher_errors.txt`, `update-watcher.log` | This machine's logs. |
@@ -1508,6 +1551,12 @@ Do not "restore fidelity" on these — the PowerShell behavior was wrong.
   (section 13). The verification script read on past it and reported empty labels.
   `launcher_errors.txt` had the answer the whole time — read it first.
 
+- **A scoped redirect held with `using var` lasts to the end of the method.** A test
+  that redirects `Paths` into a sandbox and then calls its own "against the real
+  install" section inspects the *sandbox* and passes, proving nothing. Hit
+  2026-10-12 in `LoaderPolicyTests`. Use a `using (...) { }` block and put the
+  real-install section after it, as `WorldBackupTests` does.
+
 - **`notepad` is a Store app on Windows 11, so `Start-Process -PassThru` lies about
   it.** The pid handed back belongs to a stub that exits at once while the real
   window belongs to another process. Hit 2026-10-12 while standing in for a running
@@ -1652,7 +1701,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **737 offline checks in about 7 seconds**, and around 820 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
+`MinecraftLauncher.Tests/` — **784 offline checks in about 7 seconds**, and around 870 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
 
 ```powershell
 tools\run-tests.ps1                 # everything
@@ -1665,7 +1714,7 @@ tools\run-tests.ps1 -Quiet          # failures and the summary only
 
 Suites: `versions`, `mods`, `chunky`, `players`, `loader`, `replace`, `enforce`,
 `swap`, `crashes`, `cleanup`, `required`, `deps`, `backups`, `fleet`, `blocks`,
-`packs`, `serverpacks`, `modrinth` (the last needs internet). Exit code is 0 only when
+`loaderpolicy`, `packs`, `serverpacks`, `modrinth` (the last needs internet). Exit code is 0 only when
 everything passed.
 
 **How much it prints depends on who is reading.** In a terminal it prints a line per

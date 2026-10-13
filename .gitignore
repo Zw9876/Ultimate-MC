@@ -51,6 +51,8 @@ crash-sent.txt
 required-mods-declined.txt
 play-blocks.json
 play-blocks-cache.json
+loader-policy.json
+loader-policy-cache.json
 
 # World backups. One zip of the real overworld is ~70 MB.
 backups/

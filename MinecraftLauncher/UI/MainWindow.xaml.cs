@@ -1088,6 +1088,8 @@ namespace MinecraftLauncher.UI
 
             PausePlayButton.Content = pause is null ? "PAUSE EVERYONE" : "LET EVERYONE PLAY";
 
+            RefreshLoaderPolicy();
+
             int off = machines.Count(m => m.BlockText.StartsWith("OFF"));
             FleetSummary.Text = FleetRoster.Summarise(listing, LauncherPackage.CurrentVersion) +
                                 (off > 0 ? $"  Playing is off on {off} of them." : "") +
@@ -1114,6 +1116,142 @@ namespace MinecraftLauncher.UI
         {
             RefreshFleet();
             FleetStatus.Text = $"Read at {DateTime.Now:HH:mm:ss}.";
+        }
+
+        // ── Admin: the Fabric loader everyone should be on ──
+
+        /// <summary>True while the checkbox is being set from the file, not by a person.</summary>
+        private bool _loaderPolicyLoading;
+
+        private void RefreshLoaderPolicy()
+        {
+            if (LoaderPolicySummary is null) return;
+
+            var policy = LoaderPolicy.LoadLocal();
+
+            LoaderPolicySummary.Text = LoaderPolicy.Summarise(policy);
+
+            _loaderPolicyLoading = true;
+            LoaderPolicyEnabled.IsChecked = policy.Enabled;
+            _loaderPolicyLoading = false;
+
+            // What this host itself has, which is what CHECK FABRIC will look at. Said
+            // plainly because the rule is easy to misread: it keeps Fabric current and
+            // never puts Fabric on a version somebody plays on Vanilla or Forge.
+            var clients = LoaderPolicy.FabricClients();
+            var servers = LoaderPolicy.FabricServers();
+
+            string have = clients.Count == 0 && servers.Count == 0
+                ? "This host has no Fabric loader installed anywhere, so there is nothing to pin."
+                : "On this host: " +
+                  string.Join(", ",
+                      clients.Select(c => $"client {c.Key} on {c.Value}")
+                             .Concat(servers.Select(s => $"server {s.Key} on {s.Value}"))) + ".";
+
+            LoaderPolicyNote.Text =
+                have + " Only Minecraft versions that already have a Fabric loader are " +
+                "touched, on this machine and on everyone else's — nothing gains Fabric " +
+                "that did not have it.";
+        }
+
+        private void LoaderPolicyEnabled_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_loaderPolicyLoading || LoaderPolicySummary is null) return;
+
+            var policy = LoaderPolicy.LoadLocal();
+            policy.Enabled = LoaderPolicyEnabled.IsChecked == true;
+            policy.By = FleetRoster.ThisMachine;
+
+            if (!LoaderPolicy.SaveLocal(policy))
+            {
+                LoaderPolicyStatus.Text = $"Could not write {LoaderPolicy.FilePath}.";
+                return;
+            }
+
+            LoaderPolicyStatus.Text = policy.Enabled
+                ? policy.Targets.Count == 0
+                    ? "On, but nothing is pinned yet — press CHECK FABRIC."
+                    : "On. Each machine catches up the next time its launcher opens."
+                : "Off. Nobody's loader will be changed.";
+
+            RefreshLoaderPolicy();
+        }
+
+        /// <summary>
+        /// Asks Fabric for the newest loader and pins it for everyone.
+        /// </summary>
+        /// <remarks>
+        /// Done here, once, rather than on each machine. Twenty launchers each asking
+        /// Fabric for "the latest" as they happen to start is how a fleet ends up on
+        /// several loaders — a release landing between two machines opening is enough.
+        /// The same reasoning as resolving required mods on the machine with internet.
+        /// </remarks>
+        private async void LoaderCheck_Click(object sender, RoutedEventArgs e)
+        {
+            LoaderCheckButton.IsEnabled = false;
+            LoaderPolicyStatus.Text = "Asking Fabric…";
+
+            try
+            {
+                var log = new Progress<string>(s => LoaderPolicyStatus.Text = s);
+
+                using var work = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                var existing = LoaderPolicy.LoadLocal();
+
+                var (policy, notes) = await LoaderPolicy.ResolveLatestAsync(existing, log, work.Token);
+
+                if (policy.Targets.Count == 0)
+                {
+                    LoaderPolicyStatus.Text = notes.Count > 0
+                        ? string.Join(" ", notes)
+                        : "Nothing to pin.";
+                    return;
+                }
+
+                if (!LoaderPolicy.SaveLocal(policy))
+                {
+                    LoaderPolicyStatus.Text = $"Could not write {LoaderPolicy.FilePath}.";
+                    return;
+                }
+
+                LoaderPolicyStatus.Text = string.Join(" ", notes) +
+                    (policy.Enabled
+                        ? ""
+                        : "  Tick “Keep everyone on it” for machines to act on this.");
+
+                RefreshLoaderPolicy();
+
+                // The host is a machine too, and should not be the one left behind.
+                var behind = LoaderPolicy.WhatIsBehind(policy);
+                if (behind.Count > 0 && policy.Enabled)
+                {
+                    LoaderPolicyStatus.Text +=
+                        $"  This host is behind on {behind.Count} of them; catching up…";
+
+                    var done = await LoaderPolicyClient.CatchUpAsync(policy, log, work.Token);
+                    var failed = done.FindAll(o => !o.Installed);
+
+                    LoaderPolicyStatus.Text = failed.Count == 0
+                        ? $"Pinned and installed here: {string.Join(", ", done.ConvertAll(o => o.Item.Describe()))}."
+                        : $"Pinned, but this host could not install: " +
+                          string.Join("; ", failed.ConvertAll(o => $"{o.Item.Describe()} ({o.Detail})"));
+
+                    RefreshLoaderPolicy();
+                    RefreshMods();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                LoaderPolicyStatus.Text = "Gave up waiting for Fabric.";
+            }
+            catch (Exception ex)
+            {
+                LoaderPolicyStatus.Text = $"Could not reach Fabric: {ex.Message}";
+            }
+            finally
+            {
+                LoaderCheckButton.IsEnabled = true;
+            }
         }
 
         /// <summary>
@@ -3305,6 +3443,15 @@ namespace MinecraftLauncher.UI
                     _ = FleetClient.CheckInAsync(_config, host, null, null, playing: false);
 
                 var check = lookup.Check;
+
+                // Catch the Fabric loader up to whatever the host has pinned, but only
+                // when no launcher update is about to land: that one swaps this exe and
+                // restarts, and installing a loader through it would be interrupted
+                // half-way. The loader is checked again on the next start, so nothing
+                // is lost by deferring.
+                if (check?.UpdateAvailable != true)
+                    _ = SyncFabricLoaderAsync(lookup.HostAddress);
+
                 if (check?.UpdateAvailable != true) return;
 
                 _pendingUpdate = check;
@@ -3317,6 +3464,44 @@ namespace MinecraftLauncher.UI
             {
                 // A background check must never disturb startup. If it fails the card
                 // simply stays hidden and everything else works as before.
+            }
+        }
+
+        /// <summary>
+        /// Brings this machine's Fabric loaders up to the host's pinned versions.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately silent when there is nothing to do, which is almost always.
+        /// The sidebar's update line is reused to report it, because a machine quietly
+        /// installing a loader in the background should still be visible if somebody
+        /// looks — and because an installer that says nothing at all is the kind that
+        /// gets blamed for unrelated slowness.
+        /// </remarks>
+        private async Task SyncFabricLoaderAsync(string? hostAddress)
+        {
+            try
+            {
+                var log = new Progress<string>(line =>
+                    Dispatcher.BeginInvoke(() => UpdateCheckResult.Text = line));
+
+                using var work = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+                string? said = await LoaderPolicyClient.SyncAsync(hostAddress, log, work.Token);
+
+                if (said is not null)
+                {
+                    UpdateCheckResult.Text = said;
+                    RefreshMods();
+                }
+                else
+                {
+                    UpdateCheckResult.Text = "";
+                }
+            }
+            catch (Exception ex)
+            {
+                // Never a dialog and never a fault: this is housekeeping that happens
+                // while somebody is deciding what to play.
+                App.Log(ex);
             }
         }
 

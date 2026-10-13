@@ -61,6 +61,13 @@ $targets = @(
     @{ Group='minecraft'; Host='resources.download.minecraft.net'; What='the assets';                    Needed=$true;  Url='https://resources.download.minecraft.net/b6/b62ca8ec10d07e6bf5ac8dae0c8c1d2e6a1e3356' }
     @{ Group='minecraft'; Host='repo1.maven.org';                  What='95 of 107 libs, as a fallback'; Needed=$false; Url='https://repo1.maven.org/maven2/com/google/code/gson/gson/2.11.0/gson-2.11.0.jar.sha1' }
 
+    # ---- what updating the Fabric loader needs ------------------------
+    # Decides whether a client can install a loader itself, or whether the host
+    # has to make a pack and serve it. The Mods tab's MAKE A PACK flow exists
+    # because that was once in doubt.
+    @{ Group='fabric';    Host='meta.fabricmc.net';                What='loader versions + profile JSON'; Needed=$true;  Url='https://meta.fabricmc.net/v2/versions/installer' }
+    @{ Group='fabric';    Host='maven.fabricmc.net';               What='the loader library jars';        Needed=$true;  Url='' }
+
     # ---- controls. If these fail, read the summary before anything else.
     @{ Group='control';   Host='api.modrinth.com';                 What='CONTROL: mods, known to work here'; Needed=$false; Url='https://api.modrinth.com/v2/tag/loader' }
     @{ Group='control';   Host='example.com';                      What='CONTROL: an ordinary uncategorised site'; Needed=$false; Url='https://example.com/' }
@@ -183,6 +190,7 @@ function Show($group, $title) {
 
 Show 'control'   'CONTROLS (these should pass)'
 Show 'minecraft' 'WHAT A MINECRAFT INSTALL NEEDS'
+Show 'fabric'    'WHAT UPDATING THE FABRIC LOADER NEEDS'
 Show 'hosting'   'WHERE WE COULD HOST A PAYLOAD'
 
 Write-Output ''
@@ -289,6 +297,31 @@ if ($mcRows.Count -gt 0) {
             Write-Output '   The blocked hosts resolve but will not connect, so something is'
             Write-Output '   filtering rather than DNS - a firewall, a proxy or antivirus.'
         }
+    }
+    Write-Output ''
+}
+
+# ---- fabric ----
+$fabRows = @($results | Where-Object { $_.Group -eq 'fabric' })
+if ($fabRows.Count -gt 0) {
+    $fabOk = @($fabRows | Where-Object { $_.Reached })
+
+    if ($fabOk.Count -eq $fabRows.Count) {
+        Write-Output ' FABRIC: this machine can install a loader by itself.'
+        Write-Output '   So keeping the loader up to date can happen on each machine'
+        Write-Output '   directly, and the host does not have to make and serve a pack.'
+    }
+    elseif ($fabOk.Count -eq 0) {
+        Write-Output ' FABRIC: blocked. This machine cannot install a loader on its own.'
+        Write-Output '   Updating the loader here has to go through a pack made on a'
+        Write-Output '   machine that can reach Fabric - which is what the Mods tab'
+        Write-Output '   MAKE A PACK / OPEN A PACK flow is for.'
+    }
+    else {
+        Write-Output " FABRIC: partly reachable - $(($fabOk | ForEach-Object { $_.Host }) -join ', ') only."
+        Write-Output '   That is the worst case to leave alone: the version list can be'
+        Write-Output '   read while the library jars cannot, so an install would start'
+        Write-Output '   and fail part-way. Treat it as blocked and use a pack.'
     }
     Write-Output ''
 }
