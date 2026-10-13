@@ -470,11 +470,13 @@ namespace MinecraftLauncher.UI
                 if (!verdict.Blocked) return true;
 
                 MessageBox.Show(
-                    PlayBlocks.Explain(verdict.Block!),
-                    "Playing is turned off on this computer",
+                    verdict.Explain(), verdict.Title,
                     MessageBoxButton.OK, MessageBoxImage.Warning);
 
-                ClientStatus.Text = "Playing is turned off on this computer.";
+                ClientStatus.Text = verdict.Block is not null
+                    ? "Playing is turned off on this computer."
+                    : "Playing is paused for everyone right now.";
+
                 return false;
             }
             catch (Exception ex)
@@ -1079,9 +1081,19 @@ namespace MinecraftLauncher.UI
 
             FleetList.ItemsSource = machines;
 
+            // Keep the running server's in-memory copy in step with the file, so a
+            // pause that expired while the tab was shut stops being announced.
+            var pause = PlayBlocks.PauseInForce(blocks, DateTime.UtcNow);
+            _skinServer?.Shutdown.SetPause(pause);
+
+            PausePlayButton.Content = pause is null ? "PAUSE EVERYONE" : "LET EVERYONE PLAY";
+
             int off = machines.Count(m => m.BlockText.StartsWith("OFF"));
             FleetSummary.Text = FleetRoster.Summarise(listing, LauncherPackage.CurrentVersion) +
-                                (off > 0 ? $"  Playing is off on {off} of them." : "");
+                                (off > 0 ? $"  Playing is off on {off} of them." : "") +
+                                (pause is null
+                                    ? ""
+                                    : $"  EVERYONE IS PAUSED ({pause.UntilText}).");
 
             // The one thing that makes this list misleading if it is not said: a
             // machine only reports itself when it can see this host, so an empty list
@@ -1102,6 +1114,68 @@ namespace MinecraftLauncher.UI
         {
             RefreshFleet();
             FleetStatus.Text = $"Read at {DateTime.Now:HH:mm:ss}.";
+        }
+
+        /// <summary>
+        /// Turns playing off for everyone at once, or lets everyone back on.
+        /// </summary>
+        /// <remarks>
+        /// One button for both directions, because the thing a person wants when they
+        /// look at this is "is everyone paused or not", and a pair of buttons where one
+        /// is always wrong invites the wrong click.
+        ///
+        /// Written to <c>play-blocks.json</c> <i>and</i> handed to the running server's
+        /// announcer. The file is what gates PLAY and what survives a restart; the
+        /// announcer is what the game watchers are already polling once a second, which
+        /// is how running games close without any new network traffic.
+        ///
+        /// Letting everyone back on is not confirmed. Undoing a restriction is the safe
+        /// direction, and a confirmation on it would only train people to click through.
+        /// </remarks>
+        private void PausePlay_Click(object sender, RoutedEventArgs e)
+        {
+            var blocks = PlayBlocks.LoadLocal();
+            var existing = PlayBlocks.PauseInForce(blocks, DateTime.UtcNow);
+
+            if (existing is not null)
+            {
+                PlayBlocks.ClearPause(blocks);
+                PlayBlocks.SaveLocal(blocks);
+                _skinServer?.Shutdown.SetPause(null);
+
+                FleetStatus.Text =
+                    "Everyone can play again. Anyone who tries now will get straight " +
+                    "through; games are not reopened for them.";
+
+                RefreshFleet();
+                return;
+            }
+
+            bool serving = _skinServer?.IsRunning == true;
+            var dialog = new PauseWindow(serving) { Owner = this };
+
+            if (dialog.ShowDialog() != true || dialog.Result is null) return;
+            var choice = dialog.Result;
+
+            var pause = PlayBlocks.SetPause(
+                blocks, choice.Reason, choice.Duration, FleetRoster.ThisMachine, DateTime.UtcNow);
+
+            if (!PlayBlocks.SaveLocal(blocks))
+            {
+                FleetStatus.Text = $"Could not write {PlayBlocks.FilePath}.";
+                return;
+            }
+
+            _skinServer?.Shutdown.SetPause(pause);
+
+            FleetStatus.Text = serving
+                ? $"Everyone is paused ({pause.UntilText}). Games already running close " +
+                  "within a second or two."
+                : $"Everyone is paused ({pause.UntilText}), but nothing is being served " +
+                  "from here — so nobody can START Minecraft, and any game already " +
+                  "running carries on. Start the skin server to close those too.";
+
+            RefreshFleet();
         }
 
         /// <summary>

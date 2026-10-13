@@ -191,9 +191,16 @@ namespace MinecraftLauncher.UI
                     }
                     else
                     {
-                        var (result, notice) = await SessionShutdown.PollAsync(http, _host);
+                        var (result, notice, pause) = await SessionShutdown.PollAsync(http, _host);
                         switch (result)
                         {
+                            // A pause is checked first and wins. If the host has both
+                            // asked everyone to finish up and turned playing off, the
+                            // one that cannot be declined is the one that was meant.
+                            case SessionShutdown.PollResult.Announced when pause is not null:
+                                if (_handled.Add(pause.Id)) CloseForPause(pause);
+                                break;
+
                             case SessionShutdown.PollResult.Announced when notice is not null:
                                 if (_handled.Add(notice.Id)) BeginCountdown(notice);
                                 break;
@@ -294,11 +301,49 @@ namespace MinecraftLauncher.UI
         }
 
         /// <summary>
+        /// Closes the game now, because playing has been turned off for everyone.
+        /// </summary>
+        /// <remarks>
+        /// No countdown and nothing to decline, which is the whole difference from
+        /// <see cref="BeginCountdown"/>: a shutdown is "we are finishing up" and
+        /// declining it is reasonable, while this one exists to get Minecraft out of
+        /// the way of something, so an option to keep playing would defeat it.
+        ///
+        /// A notice is still shown, and the close is started at the same moment rather
+        /// than after it. The point of the notice is not to ask — it is so the person
+        /// does not think their game crashed. Closing it changes nothing, because by
+        /// then the close is already under way.
+        ///
+        /// Still closed the gentle way: <c>CloseMainWindow</c> and up to a minute to
+        /// finish, so a singleplayer world is saved and a server is left cleanly.
+        /// "Without a countdown" is not the same as "without care".
+        /// </remarks>
+        private void CloseForPause(PauseNotice pause)
+        {
+            _busy = true;
+
+            var window = new PausedWindow(pause.Reason);
+            window.Show();
+            window.Activate();
+
+            _ = CloseGameAsync(NoticeLinger);
+        }
+
+        /// <summary>How long the paused notice stays up after the game has closed.</summary>
+        private static readonly TimeSpan NoticeLinger = TimeSpan.FromSeconds(8);
+
+        /// <summary>
         /// Closes the game the way clicking its X does, so Minecraft runs its normal
         /// shutdown: it leaves the server cleanly, and a singleplayer world is saved.
         /// Only a game that ignores that for a full minute is ended outright.
         /// </summary>
-        private async Task CloseGameAsync()
+        /// <param name="linger">
+        /// How long to leave any notice on screen after the game has gone, before this
+        /// watcher exits and takes its windows with it. Minecraft can close in a second
+        /// or two, and a message nobody had time to read is the same as no message —
+        /// they would conclude the game crashed.
+        /// </param>
+        private async Task CloseGameAsync(TimeSpan linger = default)
         {
             try
             {
@@ -323,6 +368,11 @@ namespace MinecraftLauncher.UI
             }
             finally
             {
+                if (linger > TimeSpan.Zero)
+                {
+                    try { await Task.Delay(linger); } catch { }
+                }
+
                 _app.Shutdown();
             }
         }
@@ -449,5 +499,95 @@ namespace MinecraftLauncher.UI
 
         private static Brush Brush(string key, Color fallback) =>
             Application.Current?.TryFindResource(key) as Brush ?? new SolidColorBrush(fallback);
+
+        internal static Brush Resource(string key, Color fallback) => Brush(key, fallback);
+    }
+
+    /// <summary>
+    /// What a player sees when playing has been turned off for everyone.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a <see cref="CountdownWindow"/> with the button taken off.
+    /// There is nothing to count down to and nothing to decline: the game is already
+    /// closing by the time this appears. It exists so somebody whose Minecraft just
+    /// vanished knows why, and does not go looking for a crash report or start
+    /// reinstalling things.
+    ///
+    /// No Cancel, no X that means anything, and no choice. Closing it is harmless.
+    /// </remarks>
+    internal sealed class PausedWindow : Window
+    {
+        public PausedWindow(string? reason)
+        {
+            Title = "Playing is paused";
+            Width = 460;
+            SizeToContent = SizeToContent.Height;
+            ResizeMode = ResizeMode.NoResize;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            Topmost = true;
+            ShowInTaskbar = true;
+            Background = CountdownWindow.Resource("BgBrush", Colors.Black);
+
+            try { Icon = BitmapFrame.Create(new Uri("pack://application:,,,/minecraft.ico")); }
+            catch { /* the default icon will do */ }
+
+            var heading = new TextBlock
+            {
+                Text = "PLAYING IS PAUSED FOR EVERYONE",
+                FontSize = 12,
+                FontWeight = FontWeights.Bold,
+                Foreground = CountdownWindow.Resource("AccentBrush", Colors.LightGreen)
+            };
+
+            var headline = new TextBlock
+            {
+                Text = "Minecraft is closing",
+                FontSize = 24,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 10, 0, 8),
+                Foreground = CountdownWindow.Resource("TextBrush", Colors.White)
+            };
+
+            var detail = new TextBlock
+            {
+                Text = "Whoever is hosting needs Minecraft closed for a few minutes — " +
+                       "usually to update the launchers or to work on the server. This is " +
+                       "not a crash, and nothing you were doing is lost: the game is being " +
+                       "closed the normal way, as if you clicked its X.",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+                Foreground = CountdownWindow.Resource("MutedBrush", Colors.Gray)
+            };
+
+            var panel = new StackPanel
+            {
+                Margin = new Thickness(24, 20, 24, 20),
+                Children = { heading, headline, detail }
+            };
+
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = $"They said: {reason!.Trim()}",
+                    TextWrapping = TextWrapping.Wrap,
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    Margin = new Thickness(0, 12, 0, 0),
+                    Foreground = CountdownWindow.Resource("TextBrush", Colors.White)
+                });
+            }
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Open the launcher again in a few minutes and press PLAY as usual.",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 11,
+                Margin = new Thickness(0, 14, 0, 0),
+                Foreground = CountdownWindow.Resource("MutedBrush", Colors.Gray)
+            });
+
+            Content = panel;
+        }
     }
 }

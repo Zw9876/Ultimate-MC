@@ -1022,6 +1022,14 @@
                                 <Button x:Name="FleetRefreshButton" Content="Refresh" Width="100" Height="32"
                                         Margin="0,0,8,0" Click="FleetRefresh_Click"
                                         Style="{StaticResource PlainButton}"/>
+                                <!-- Everyone at once. Deliberately first and separate
+                                     from the per-machine buttons: it is the one most
+                                     likely to be wanted in a hurry. -->
+                                <Button x:Name="PausePlayButton" Content="PAUSE EVERYONE"
+                                        Width="160" Height="32" Margin="0,0,14,0"
+                                        Click="PausePlay_Click" Style="{StaticResource AccentButton}"
+                                        ToolTip="Closes everyone's Minecraft now, with no countdown and nothing to decline, and stops it starting again until you turn it back on"/>
+
                                 <Button x:Name="FleetBlockButton" Content="Turn playing off…"
                                         Width="150" Height="32" Margin="0,0,8,0"
                                         Click="FleetBlock_Click" Style="{StaticResource PlainButton}"

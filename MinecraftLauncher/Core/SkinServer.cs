@@ -136,6 +136,11 @@ namespace MinecraftLauncher.Core
             // first game to connect would be closed on arrival.
             Shutdown.Clear();
 
+            // A pause is the opposite case and must survive: it is persisted precisely
+            // so that restarting the launcher in the middle of maintenance does not
+            // quietly let everybody back in.
+            Shutdown.SetPause(PlayBlocks.PauseInForce(PlayBlocks.LoadLocal(), DateTime.UtcNow));
+
             _cts = new CancellationTokenSource();
             var ct = _cts.Token;
 

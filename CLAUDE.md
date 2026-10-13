@@ -11,7 +11,7 @@ The C# launcher (`MinecraftLauncher/`, .NET 10 WPF) is **complete and shipping**
 The whole PowerShell feature set is ported plus a good deal more;
 `MinecraftLauncher-Standalone.ps1` is now only a behavioural reference.
 
-**Current build: 1.2.285.114** (2026-10-12) at the repo root. **The rollout zip has
+**Current build: 1.2.285.145** (2026-10-12) at the repo root. **The rollout zip has
 not been rebuilt for it** and is still on 1.2.280.291. Build both zips with
 `tools\Build-RolloutZip.ps1` rather than by hand — it refuses to write an update zip
 containing anything host-only. Updates are mandatory and self-installing, so in
@@ -38,7 +38,8 @@ section 5 — read it there rather than expecting a summary here.
 Built and tested here but **never run on the real machines**: the crash report
 viewer, mod update checking against Modrinth, "Delete disabled", Fabric loader
 packs for servers, required mods, world backups, the fleet list, crash reports
-reaching the host, and — new on 2026-10-12 — turning playing off for one machine. They are covered by tests and by
+reaching the host, and — new on 2026-10-12 — turning playing off for one machine
+and pausing everyone at once. They are covered by tests and by
 driving the real UI; they have not met twenty machines and a Friday evening. Also
 section 5.
 
@@ -120,8 +121,8 @@ beside the exe and finds nothing.
   compiled fine and failed at run time — a wrong Java version, a silently
   misdirected installer, a profile the scanner could not see. Launch it, drive the
   UI, read the server output.
-- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 692 offline checks in about 10
-  seconds, exit code 0 when clean; around 780 with the network suite, which moves
+- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 737 offline checks in about 7
+  seconds, exit code 0 when clean; around 820 with the network suite, which moves
   with the live Modrinth API. `-Offline` skips the network suite. Piped
   anywhere it prints only failures and the count — `-ShowAll` for a line per check.
   Add to `MinecraftLauncher.Tests/Suites/` as work lands — and write the checks against
@@ -136,8 +137,8 @@ beside the exe and finds nothing.
   is the only thing that catches it before rollout day. `tools\Verify-AutoUpdate.ps1`
   covers the unattended update path when that changes, `tools\Verify-Admin.ps1` the
   Admin tab and the two host endpoints, and `tools\Verify-Backups.ps1` the backup
-  buttons, and `tools\Verify-Blocks.ps1` that a block really does stop a game
-  starting. See HANDOFF.md section 13 — and read `launcher_errors.txt` before
+  buttons, `tools\Verify-Blocks.ps1` that a block really does stop a game starting,
+  and `tools\Verify-Pause.ps1` that pausing everyone closes a running game. See HANDOFF.md section 13 — and read `launcher_errors.txt` before
   concluding a panel "did not render", because a binding error behind an invisible
   MessageBox looks exactly like one.
 - **Keep HANDOFF.md updated** as work lands — sections 5, 10, 11 and 13. Update it

@@ -435,6 +435,49 @@ including where WebView2 is loaded from — depends on it.
     added a third 1500 ms UDP wait to a launch that already paid two — part of section
     10 item 7.
 
+- **Pausing everyone at once** (Admin tab -> FLEET -> PAUSE EVERYONE) — added
+  2026-10-12. Closes every running game on the network within a second or two and
+  stops anybody starting one, until it is lifted or its time runs out. For server
+  work, and as a failsafe for updating the launchers when Minecraft is in the way.
+
+  **It is not the same thing as "shut down for everyone", and the difference is the
+  point.** That one is an event with a countdown and a *Keep playing* button, which
+  is right for "we are finishing for the evening" — and useless here, because one
+  click defeats it. A pause has **no countdown and nothing to decline**.
+
+  - **Still closed gently.** `CloseMainWindow` and up to a minute to finish, so a
+    singleplayer world is saved and a server left cleanly. "No countdown" is not
+    "no care". Only a game that ignores the request for a full minute is ended.
+  - **A notice still appears**, at the same moment the close starts rather than
+    before it. It is not asking — it is so somebody whose game vanished does not go
+    hunting for a crash report. `PausedWindow`, which has no Cancel and whose X does
+    nothing, and it lingers 8 s after the game has gone because Minecraft can close
+    in two and an unread message is the same as none.
+  - **It rides the channel the watchers already poll.** The pause is added to the
+    `/launcher/shutdown` reply, which every game watcher asks for once a second.
+    A second endpoint would have meant twenty machines making forty requests a
+    second for something the first could carry. An older host answers only the
+    shutdown half, which reads as "not paused" rather than as a broken reply.
+  - **Persisted in `play-blocks.json`, cached in memory for the poll.** The file is
+    the source of truth and is what gates PLAY; `SkinServer.Start` loads it into the
+    announcer, so restarting the launcher in the middle of maintenance does not
+    quietly let everybody back in. Re-reading the file to answer a once-a-second
+    poll from twenty machines would be wasteful for a value that changes twice an
+    evening.
+  - **Timed by default** (15 minutes, 30, an hour, or until lifted; 30 is
+    pre-selected). A pause that lifts itself cannot strand anybody because somebody
+    forgot, and the client caches it — so, as with an individual block, pulling out
+    the network cable does not get round it.
+  - **The host is exempt**, which matters more here than for individual blocks: the
+    usual reason to pause everyone is to do something *to the launchers*.
+  - **An individual block beats a pause** when both apply, because it is the more
+    specific answer — somebody told the general message would come straight back
+    the moment the pause lifted.
+  - **Known limit:** with nothing being served from the host, a pause still stops
+    anybody *starting* Minecraft but no running game hears about it, because there
+    is nothing for the watchers to poll. The dialog says so rather than implying
+    otherwise.
+
 - **Crash reports reaching the host** (Admin tab) — clients hand their crash reports
   over so the person who fixes them does not have to walk to each machine.
   `Core/CrashInbox.cs`, `POST /launcher/crash`. The **game watcher** sends them after
@@ -1465,6 +1508,40 @@ Do not "restore fidelity" on these — the PowerShell behavior was wrong.
   (section 13). The verification script read on past it and reported empty labels.
   `launcher_errors.txt` had the answer the whole time — read it first.
 
+- **`notepad` is a Store app on Windows 11, so `Start-Process -PassThru` lies about
+  it.** The pid handed back belongs to a stub that exits at once while the real
+  window belongs to another process. Hit 2026-10-12 while standing in for a running
+  game: the watcher found nothing to watch and exited, and *two checks then passed
+  against nothing running*. For a stand-in window, start a PowerShell process that
+  shows a WinForms form — own pid, real window, closes on `WM_CLOSE` — and write the
+  script to a file and run it with `-File`, because a multi-line `-Command` argument
+  does not survive `Start-Process` argument parsing and the symptom is simply no
+  window.
+
+  The general lesson, which has now cost time three times: **a check that cannot
+  distinguish "it worked" from "it never ran" is worse than no check.** Gate the
+  dependent assertions on the setup having actually happened, and say out loud that
+  they were skipped.
+
+- **Matching a status message on one word matches other messages.** A pause check
+  looked for "everyone" in the launcher's status and passed — on *"would drop custom
+  skins for everyone on the server"*, while the game had launched perfectly happily.
+  Assert on the distinctive phrase, and pair it with an assertion that cannot be
+  fooled by wording at all: here, that no Java process appeared.
+
+- **A collapsed WPF panel is not in the UI Automation tree.** Looking for
+  `PlayButton` while the Skins tab was showing returned null, and because the
+  section was wrapped in `if ($play)` it skipped in complete silence — which reads
+  exactly like a section that passed. Navigate to the tab first, and make the
+  null case a failure rather than a skip.
+
+- **To exercise a client path on the host, pin it with `SKIN_SERVER=`.** On the host
+  itself `SkinDiscovery.FindRemote` deliberately finds nothing, because it prefers a
+  *remote* skin server — so there is no host to ask and every host-dependent check
+  sails through. `SKIN_SERVER=127.0.0.1:25567` in `config.txt` makes the launcher a
+  client of the server on its own machine. This is the same trick the self-update
+  test needed before UDP discovery was field-proven.
+
 - **`FindWindow(NULL, title)` does not find a `MessageBox`.** Measured 2026-10-12
   against a live block dialog, in the same process:
 
@@ -1575,7 +1652,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **692 offline checks in about 10 seconds**, and around 780 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
+`MinecraftLauncher.Tests/` — **737 offline checks in about 7 seconds**, and around 820 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
 
 ```powershell
 tools\run-tests.ps1                 # everything
@@ -1612,6 +1689,7 @@ sessions before being kept:
 | `Verify-AutoUpdate.ps1` | The whole mandatory-update path, unattended: a newer host serving, an older client nobody touches, and the client swapping itself byte-for-byte and relaunching. Needs a Debug build **and** a Release publish made at least a minute later, so the host is the newer one. |
 | `Verify-Admin.ps1` | The Admin tab end to end: that the three sub-tabs render at all (a retemplated `TabControl` can show headers over an empty panel — section 11), that a check-in and a crash report posted exactly as another machine would post them are accepted, refused when malformed, and not stored twice, and that the host's own panels then *show* them. 36/36 on 2026-10-07. Creates `admin.flag` if absent and removes it again. |
 | `Verify-Backups.ps1` | The backup buttons on both tabs, against a throwaway world placed in the real saves folder: that the zip appears, opens again, keeps `level.dat` and the region data, and leaves `session.lock` out. `-IncludeServerWorld` additionally backs up the real server world — 110 MB, 297 files, **3 s**, 69.8 MB — and keeps it. 26/26 on 2026-10-07. Also fails if anything reached `launcher_errors.txt`, since that is where an invisible `MessageBox` leaves its evidence. |
+| `Verify-Pause.ps1` | **Pausing everyone, end to end, without launching Minecraft.** Sets a pause, starts the skin server, checks the shutdown channel announces it *and not as a shutdown*, then starts a **real game watcher** pointed at a stand-in window and asserts the window is closed, that the notice shown is the one that cannot be declined, and that the watcher then exits so the exe is free for an update. Finally presses PLAY and asserts it is refused and no Java appears. Pins itself with `SKIN_SERVER=` and needs `admin.flag` absent. 18/18 on 2026-10-12. |
 | `Verify-Blocks.ps1` | **The one check in the play-block feature that counts.** Plants a block for this machine in the cache, presses PLAY on a real launcher, and asserts on *behaviour*: a dialog appeared, the launcher did **not** close, and **no Java process started**. Then does it again with an expired block and asserts nothing happens. Needs `admin.flag` absent — that machine is never blocked — which is why it is not part of `Verify-Admin.ps1`. 10/10 on 2026-10-12. |
 | `Build-RolloutZip.ps1` | Builds both zips, refusing to write an update zip that contains anything host-only. See section 8. |
 | `Diagnose-MinecraftNet.ps1` | Why Minecraft cannot reach the internet on a machine — see section 10. |

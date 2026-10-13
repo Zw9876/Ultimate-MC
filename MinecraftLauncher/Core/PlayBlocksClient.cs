@@ -31,9 +31,25 @@ namespace MinecraftLauncher.Core
         /// <summary>Where the answer came from, which decides what to tell the person.</summary>
         public enum Origin { Host, Cache, Nowhere }
 
-        public sealed record Verdict(PlayBlocks.Block? Block, Origin From)
+        public sealed record Verdict(PlayBlocks.Block? Block, PlayBlocks.Pause? Pause, Origin From)
         {
-            public bool Blocked => Block is not null;
+            public bool Blocked => Block is not null || Pause is not null;
+
+            /// <summary>
+            /// The individual block wins when both apply, because it is the more
+            /// specific answer: "you in particular" beats "everybody at the moment",
+            /// and somebody told the general message would come straight back when the
+            /// pause lifted.
+            /// </summary>
+            public string Explain() =>
+                Block is not null ? PlayBlocks.Explain(Block)
+                : Pause is not null ? PlayBlocks.ExplainPause(Pause)
+                : "";
+
+            /// <summary>The window title that goes with <see cref="Explain"/>.</summary>
+            public string Title =>
+                Block is not null ? "Playing is turned off on this computer"
+                                  : "Playing is paused";
 
             public string Describe() => From switch
             {
@@ -55,7 +71,7 @@ namespace MinecraftLauncher.Core
             // The host's own launcher is never blocked, and it also holds the master
             // list rather than a cache, so there is nothing to ask anybody.
             if (RequiredMods.AdminEnabled)
-                return new Verdict(null, Origin.Host);
+                return new Verdict(null, null, Origin.Host);
 
             var now = DateTime.UtcNow;
 
@@ -73,7 +89,10 @@ namespace MinecraftLauncher.Core
                     // switched off straight afterwards still knows next time.
                     PlayBlocks.SaveCache(listing);
 
-                    return new Verdict(PlayBlocks.BlockOnThisMachine(listing, now), Origin.Host);
+                    return new Verdict(
+                        PlayBlocks.BlockOnThisMachine(listing, now),
+                        PlayBlocks.PauseOnThisMachine(listing, now),
+                        Origin.Host);
                 }
                 catch (Exception)
                 {
@@ -84,10 +103,13 @@ namespace MinecraftLauncher.Core
 
             var cached = PlayBlocks.LoadCache();
             var block = PlayBlocks.BlockOnThisMachine(cached, now);
+            var pause = PlayBlocks.PauseOnThisMachine(cached, now);
 
-            return block is not null
-                ? new Verdict(block, Origin.Cache)
-                : new Verdict(null, cached.Blocks.Count > 0 ? Origin.Cache : Origin.Nowhere);
+            bool remembered = cached.Blocks.Count > 0 || cached.Pause is not null;
+
+            return block is not null || pause is not null
+                ? new Verdict(block, pause, Origin.Cache)
+                : new Verdict(null, null, remembered ? Origin.Cache : Origin.Nowhere);
         }
     }
 }

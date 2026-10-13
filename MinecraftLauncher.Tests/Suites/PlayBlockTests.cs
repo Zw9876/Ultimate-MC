@@ -44,6 +44,8 @@ namespace MinecraftLauncher.Tests
                 Storing();
                 ThisMachine(sandbox);
                 Caching(sandbox);
+                Pausing(sandbox);
+                PauseOnTheWire();
             }
             finally
             {
@@ -53,6 +55,13 @@ namespace MinecraftLauncher.Tests
 
         private static PlayBlocks.Listing With(params PlayBlocks.Block[] blocks) =>
             new() { Blocks = blocks.ToList() };
+
+        private static PlayBlocks.Listing WithPause(string reason)
+        {
+            var listing = new PlayBlocks.Listing();
+            PlayBlocks.SetPause(listing, reason, null, "HOST-PC", Now);
+            return listing;
+        }
 
         private static PlayBlocks.Block Block(
             string machine = "DESKTOP-A", string? guid = "11111111-2222-3333-4444-555555555555",
@@ -263,6 +272,157 @@ namespace MinecraftLauncher.Tests
             }
         }
 
+        private static void Pausing(string sandbox)
+        {
+            Section("turning playing off for everyone");
+
+            var listing = new PlayBlocks.Listing();
+            Check("nothing is paused to begin with",
+                  PlayBlocks.PauseInForce(listing, Now) is null);
+
+            var pause = PlayBlocks.SetPause(listing, "updating the launchers",
+                                            TimeSpan.FromMinutes(30), "HOST-PC", Now);
+
+            Check("a pause is in force", PlayBlocks.PauseInForce(listing, Now) is not null);
+            Expect("with the reason", pause.Reason, "updating the launchers");
+            Expect("and who set it", pause.By, "HOST-PC");
+            Expect("ending when it should", pause.Until, Now.AddMinutes(30));
+            Check("it has an id", pause.Id.Length > 0);
+
+            // A fresh id each time, or a watcher that already acted on an earlier
+            // pause would ignore the next one.
+            var again = PlayBlocks.SetPause(listing, null, null, "HOST-PC", Now);
+            Check("turning it on again gets a new id", again.Id != pause.Id);
+            Check("and an open-ended one does not expire", again.Until is null);
+            Expect("with no end it reads as such", again.UntilText, "until it is turned back on");
+
+            // A timed pause must lift itself: a forgotten one would strand everybody.
+            PlayBlocks.SetPause(listing, null, TimeSpan.FromMinutes(5), null, Now);
+            Check("a timed pause is in force before its time",
+                  PlayBlocks.PauseInForce(listing, Now) is not null);
+            Check("and gone after it",
+                  PlayBlocks.PauseInForce(listing, Now.AddMinutes(6)) is null);
+
+            Expect("tidying up removes an expired pause",
+                   PlayBlocks.DropExpired(listing, Now.AddMinutes(6)), 1);
+            Check("and it is really gone", listing.Pause is null);
+
+            PlayBlocks.SetPause(listing, null, null, null, Now);
+            Check("clearing an active pause works", PlayBlocks.ClearPause(listing));
+            Check("clearing nothing is not an error", !PlayBlocks.ClearPause(listing));
+
+            // It must survive a restart - the whole reason it is on disk rather than
+            // only in the running server's memory.
+            PlayBlocks.SetPause(listing, "server maintenance", null, "HOST-PC", Now);
+            PlayBlocks.SaveLocal(listing);
+
+            var reloaded = PlayBlocks.LoadLocal();
+            Check("a pause survives being written and read back",
+                  PlayBlocks.PauseInForce(reloaded, Now) is not null);
+            Expect("with its reason", reloaded.Pause!.Reason, "server maintenance");
+
+            // What the person pressing PLAY reads.
+            string text = PlayBlocks.ExplainPause(reloaded.Pause!);
+            Note(text.Replace(Environment.NewLine, " / "));
+            Check("it says everyone, not just them", text.Contains("for everyone"), text);
+            Check("gives the reason", text.Contains("server maintenance"), text);
+            Check("and does not read as a fault",
+                  !text.Contains("error") && !text.Contains("crash"), text);
+
+            // Blocks and the pause are independent.
+            PlayBlocks.Set(reloaded, "DESKTOP-Z", null, "Zed", "separate", null, "HOST-PC", Now);
+            Check("a block still applies while paused",
+                  PlayBlocks.InForce(reloaded, "DESKTOP-Z", null, Now) is not null);
+            PlayBlocks.ClearPause(reloaded);
+            Check("and survives the pause being lifted",
+                  PlayBlocks.InForce(reloaded, "DESKTOP-Z", null, Now) is not null);
+
+            // The host is not locked out by a pause either - especially since pausing
+            // is usually in order to work on the launchers.
+            string flag = Path.Combine(sandbox, "admin.flag");
+            bool hadFlag = File.Exists(flag);
+            var global = new PlayBlocks.Listing();
+            PlayBlocks.SetPause(global, "maintenance", null, "HOST-PC", Now);
+
+            try
+            {
+                if (hadFlag) File.Delete(flag);
+                Check("a pause applies to an ordinary machine",
+                      PlayBlocks.PauseOnThisMachine(global, Now) is not null);
+
+                File.WriteAllText(flag, "");
+                Check("but never to the machine holding admin.flag",
+                      PlayBlocks.PauseOnThisMachine(global, Now) is null);
+            }
+            finally
+            {
+                try { if (File.Exists(flag)) File.Delete(flag); } catch { }
+                if (hadFlag) File.WriteAllText(flag, "");
+            }
+
+            File.Delete(PlayBlocks.FilePath);
+        }
+
+        private static void PauseOnTheWire()
+        {
+            Section("how a pause reaches a running game");
+
+            var announcer = new ShutdownAnnouncer();
+
+            Check("nothing announced to begin with",
+                  SessionShutdown.ParsePause(announcer.ToJson()) is null);
+            Check("and no shutdown either",
+                  SessionShutdown.Parse(announcer.ToJson()) is null);
+
+            announcer.SetPause(new PlayBlocks.Pause
+            {
+                Id = "abc123", Reason = "updating the launchers", Since = DateTime.UtcNow
+            });
+
+            string json = announcer.ToJson();
+            Note(json);
+
+            var notice = SessionShutdown.ParsePause(json);
+            Check("a pause reaches the client", notice is not null);
+            Expect("with its id, so a watcher acts once", notice!.Id, "abc123");
+            Expect("and the reason to show them", notice.Reason, "updating the launchers");
+
+            // It rides the channel the watchers already poll, so a shutdown and a
+            // pause have to travel together without confusing each other.
+            announcer.Announce(10);
+            string both = announcer.ToJson();
+            Check("a shutdown still parses alongside it",
+                  SessionShutdown.Parse(both) is not null);
+            Check("and so does the pause", SessionShutdown.ParsePause(both) is not null);
+
+            announcer.SetPause(null);
+            Check("clearing it stops it being announced",
+                  SessionShutdown.ParsePause(announcer.ToJson()) is null);
+            Check("without disturbing the shutdown",
+                  SessionShutdown.Parse(announcer.ToJson()) is not null);
+
+            // A host too old to know about pauses answers only the shutdown half, and
+            // that has to read as "not paused" rather than as a broken reply.
+            Check("an older host's reply reads as not paused",
+                  SessionShutdown.ParsePause("""{"shutdown":false}""") is null);
+            Check("and its shutdown still works",
+                  SessionShutdown.Parse("""{"shutdown":true,"id":"x","countdown":5}""") is not null);
+
+            Check("rubbish is not a pause", SessionShutdown.ParsePause("{ not json") is null);
+            Check("nor is one with no id", SessionShutdown.ParsePause("""{"paused":true}""") is null);
+
+            // A pause whose time has passed must not still be announced, worked out on
+            // the host so two machines' clocks never have to agree.
+            var spent = new ShutdownAnnouncer();
+            spent.SetPause(new PlayBlocks.Pause
+            {
+                Id = "old", Since = DateTime.UtcNow.AddHours(-2), Until = DateTime.UtcNow.AddHours(-1)
+            });
+            Check("an expired pause is not announced",
+                  SessionShutdown.ParsePause(spent.ToJson()) is null);
+            Check("and reads as cleared on the host too", spent.CurrentPause is null);
+        }
+
         private static void Caching(string sandbox)
         {
             Section("remembering the answer");
@@ -312,6 +472,33 @@ namespace MinecraftLauncher.Tests
 
             var spent = PlayBlocksClient.CheckAsync(null).GetAwaiter().GetResult();
             Check("an expired cached block has stopped applying", !spent.Blocked, spent.Describe());
+
+            // A pause has to be cached too, or unplugging the network would defeat a
+            // maintenance pause just as it would an individual block.
+            PlayBlocks.SaveCache(WithPause("mid-update"));
+            var pausedVerdict = PlayBlocksClient.CheckAsync(null).GetAwaiter().GetResult();
+            Check("a remembered pause still applies with no host", pausedVerdict.Blocked,
+                  pausedVerdict.Describe());
+            Check("and is reported as a pause, not an individual block",
+                  pausedVerdict.Pause is not null && pausedVerdict.Block is null);
+            Check("with the right wording", pausedVerdict.Title == "Playing is paused",
+                  pausedVerdict.Title);
+            Check("naming the reason", pausedVerdict.Explain().Contains("mid-update"),
+                  pausedVerdict.Explain());
+
+            // When both apply, the specific answer is the useful one: being told the
+            // general message would have them back the moment the pause lifted.
+            var bothCached = WithPause("everyone");
+            bothCached.Blocks.Add(new PlayBlocks.Block
+            {
+                Machine = me, Reason = "you in particular", Since = Now
+            });
+            PlayBlocks.SaveCache(bothCached);
+
+            var mixed = PlayBlocksClient.CheckAsync(null).GetAwaiter().GetResult();
+            Check("an individual block wins over a pause", mixed.Block is not null);
+            Check("and that is what they are told",
+                  mixed.Explain().Contains("you in particular"), mixed.Explain());
 
             // And the host itself is never blocked by its own cache.
             string flag = Path.Combine(sandbox, "admin.flag");

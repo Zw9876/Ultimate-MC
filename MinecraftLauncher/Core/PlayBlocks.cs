@@ -93,9 +93,46 @@ namespace MinecraftLauncher.Core
                 : Until.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
         }
 
+        /// <summary>
+        /// Playing turned off for everyone at once, for maintenance.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately not expressed as a <see cref="Block"/> matching everybody.
+        /// <see cref="Matches"/> refuses an entry with no machine and no GUID precisely
+        /// so a malformed line cannot stop a whole room, and a wildcard entry would mean
+        /// fighting that rail rather than keeping it.
+        ///
+        /// It is also a different thing from "shut down for everyone". That is an event
+        /// with a countdown somebody can decline — right for "we are done for the
+        /// evening". This is a gate: running games are closed without a countdown and
+        /// nobody can decline, because the point is to get Minecraft out of the way of
+        /// something, and an option to keep playing defeats it.
+        /// </remarks>
+        public sealed class Pause
+        {
+            /// <summary>New every time it is turned on, so a watcher acts on each once.</summary>
+            [JsonPropertyName("id")] public string Id { get; set; } = "";
+
+            [JsonPropertyName("reason")] public string? Reason { get; set; }
+            [JsonPropertyName("since")]  public DateTime Since { get; set; }
+
+            /// <summary>When it lifts itself, UTC. Null means it stays until turned off.</summary>
+            [JsonPropertyName("until")] public DateTime? Until { get; set; }
+
+            [JsonPropertyName("by")] public string? By { get; set; }
+
+            [JsonIgnore]
+            public string UntilText => Until is null
+                ? "until it is turned back on"
+                : Until.Value.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+        }
+
         public sealed class Listing
         {
             [JsonPropertyName("blocks")] public List<Block> Blocks { get; set; } = new();
+
+            /// <summary>Present and unexpired means nobody plays. Null means normal.</summary>
+            [JsonPropertyName("pause")] public Pause? Pause { get; set; }
         }
 
         // ── Matching ─────────────────────────────────────────────────
@@ -149,6 +186,20 @@ namespace MinecraftLauncher.Core
             return InForce(listing, FleetRoster.ThisMachine, ThisMachineGuid, nowUtc);
         }
 
+        /// <summary>
+        /// The pause as it applies to this computer. Null on the host's own machine.
+        /// </summary>
+        /// <remarks>
+        /// The same exemption as individual blocks, and for a sharper reason: the whole
+        /// point of pausing everyone is usually to do something to the launchers, and
+        /// being locked out of your own while doing it would be absurd.
+        /// </remarks>
+        public static Pause? PauseOnThisMachine(Listing listing, DateTime nowUtc)
+        {
+            if (RequiredMods.AdminEnabled) return null;
+            return PauseInForce(listing, nowUtc);
+        }
+
         /// <summary>What to tell the person, in plain words.</summary>
         public static string Explain(Block block)
         {
@@ -171,9 +222,81 @@ namespace MinecraftLauncher.Core
             return string.Join(Environment.NewLine, lines);
         }
 
-        /// <summary>Removes blocks that have run out, and says how many went.</summary>
-        public static int DropExpired(Listing listing, DateTime nowUtc) =>
-            listing.Blocks.RemoveAll(b => HasExpired(b, nowUtc));
+        /// <summary>
+        /// Removes blocks that have run out, and the pause if it has. Says how many went,
+        /// counting the pause as one.
+        /// </summary>
+        public static int DropExpired(Listing listing, DateTime nowUtc)
+        {
+            int gone = listing.Blocks.RemoveAll(b => HasExpired(b, nowUtc));
+
+            if (listing.Pause is { Until: not null } p && p.Until!.Value <= nowUtc)
+            {
+                listing.Pause = null;
+                gone++;
+            }
+
+            return gone;
+        }
+
+        /// <summary>The pause if one is in force, or null.</summary>
+        public static Pause? PauseInForce(Listing listing, DateTime nowUtc)
+        {
+            var pause = listing.Pause;
+            if (pause is null) return null;
+            return pause.Until is not null && pause.Until.Value <= nowUtc ? null : pause;
+        }
+
+        /// <summary>
+        /// Turns playing off for everyone. A fresh id each time, so a watcher that
+        /// already acted on an earlier pause acts on this one too.
+        /// </summary>
+        public static Pause SetPause(
+            Listing listing, string? reason, TimeSpan? duration, string? by, DateTime nowUtc)
+        {
+            listing.Pause = new Pause
+            {
+                Id     = Guid.NewGuid().ToString("N"),
+                Reason = string.IsNullOrWhiteSpace(reason) ? null : reason!.Trim(),
+                Since  = nowUtc,
+                Until  = duration is null ? null : nowUtc + duration.Value,
+                By     = by
+            };
+
+            return listing.Pause;
+        }
+
+        public static bool ClearPause(Listing listing)
+        {
+            if (listing.Pause is null) return false;
+            listing.Pause = null;
+            return true;
+        }
+
+        /// <summary>What to tell somebody who pressed PLAY while everything is paused.</summary>
+        public static string ExplainPause(Pause pause)
+        {
+            var lines = new List<string>
+            {
+                "Playing is paused for everyone at the moment.",
+                "",
+                "Whoever is hosting is doing something that needs Minecraft closed — " +
+                "updating the launchers, or working on the server."
+            };
+
+            if (!string.IsNullOrWhiteSpace(pause.Reason))
+            {
+                lines.Add("");
+                lines.Add($"They said: {pause.Reason!.Trim()}");
+            }
+
+            lines.Add("");
+            lines.Add(pause.Until is null
+                ? "Try again in a few minutes."
+                : $"It lifts at about {pause.UntilText}.");
+
+            return string.Join(Environment.NewLine, lines);
+        }
 
         /// <summary>Adds or replaces the block for a machine.</summary>
         public static Block Set(
@@ -306,7 +429,12 @@ namespace MinecraftLauncher.Core
 
                 var mine = new Listing
                 {
-                    Blocks = listing.Blocks.Where(b => Matches(b, machine, guid)).ToList()
+                    Blocks = listing.Blocks.Where(b => Matches(b, machine, guid)).ToList(),
+
+                    // The pause is cached as well, and has to be: it applies to this
+                    // machine like anyone else's, so leaving it out would mean pulling
+                    // out the network cable defeats a maintenance pause.
+                    Pause = listing.Pause
                 };
 
                 string temp = CachePath + ".tmp";
