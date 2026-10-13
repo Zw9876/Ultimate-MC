@@ -66,3 +66,5 @@ Thumbs.db
 launcher_errors.txt
 # Written by tools\Why-was-this-blocked.cmd on whichever machine it is run.
 antivirus-report.txt
+# Written by tools\Test-DownloadHosts.ps1, likewise.
+download-hosts-report.txt

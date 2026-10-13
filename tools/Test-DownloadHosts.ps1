@@ -44,13 +44,58 @@
 
 param(
     [switch]$HostingOnly,
-    [switch]$MinecraftOnly
+    [switch]$MinecraftOnly,
+
+    # Everything printed is also written here, so the results survive the window
+    # closing. Double-clicking a .ps1 (or "Run with PowerShell") closes it the
+    # instant the script ends, which lost a whole run once.
+    [string]$Out,
+
+    # Skip the "press Enter" at the end. Set automatically when the output is
+    # being redirected, since nothing is waiting to read the window then.
+    [switch]$NoPause
 )
 
 $ErrorActionPreference = 'Continue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $ConnectTimeoutMs = 8000
+
+if (-not $Out) {
+    $Out = Join-Path (Split-Path -Parent $PSScriptRoot) 'download-hosts-report.txt'
+}
+
+# Every line goes through Say, which prints it AND keeps it, and the whole lot is
+# written out at the end.
+#
+# NOT Start-Transcript, which was the first attempt: it only records what reaches
+# the HOST, so the moment anything redirects the output the report is just a
+# transcript header and nothing else. Tested, and that is exactly what happened.
+# Recording the lines here instead works however the script is invoked.
+$script:report = New-Object System.Collections.Generic.List[string]
+
+function Say($text = '') {
+    if ($null -eq $text) { $text = '' }
+    foreach ($line in ([string]$text) -split "`r?`n") {
+        $script:report.Add($line)
+        Write-Output $line
+    }
+}
+
+function SaveReport {
+    try {
+        Set-Content -LiteralPath $Out -Value $script:report -Encoding ASCII -ErrorAction Stop
+        return $true
+    } catch {
+        Write-Output "  (could not write the report to $Out - $($_.Exception.Message))"
+        return $false
+    }
+}
+
+Say ''
+Say 'Everything below is also being saved to:'
+Say "  $Out"
+Say ''
 
 $targets = @(
     # ---- what a Minecraft install needs -------------------------------
@@ -117,7 +162,18 @@ function Short-Issuer($issuer) {
 
 $results = @()
 
+Say ("Probing " + $targets.Count + " hosts. Each one does a DNS lookup, a TLS")
+Say "handshake and sometimes a small request, so a blocked one takes a few"
+Say "seconds to time out."
+Say ''
+
+$done = 0
 foreach ($t in $targets) {
+    # Printed BEFORE the probe, not after: the whole point is that the window
+    # shows something while a blocked host is timing out.
+    $done++
+    Say ("  [{0,2}/{1}] {2}" -f $done, $targets.Count, $t.Host)
+
     $row = [ordered]@{
         Group = $t.Group; Host = $t.Host; What = $t.What
         Dns = '-'; Tls = '-'; Issuer = '-'; Http = '-'
@@ -183,9 +239,9 @@ foreach ($t in $targets) {
 function Show($group, $title) {
     $rows = @($results | Where-Object { $_.Group -eq $group })
     if ($rows.Count -eq 0) { return }
-    Write-Output ''
-    Write-Output "---- $title ----"
-    Write-Output (($rows | Format-Table Host, What, Dns, Tls, Issuer, Http -AutoSize | Out-String).TrimEnd())
+    Say ''
+    Say "---- $title ----"
+    Say (($rows | Format-Table Host, What, Dns, Tls, Issuer, Http -AutoSize | Out-String).TrimEnd())
 }
 
 Show 'control'   'CONTROLS (these should pass)'
@@ -193,8 +249,8 @@ Show 'minecraft' 'WHAT A MINECRAFT INSTALL NEEDS'
 Show 'fabric'    'WHAT UPDATING THE FABRIC LOADER NEEDS'
 Show 'hosting'   'WHERE WE COULD HOST A PAYLOAD'
 
-Write-Output ''
-Write-Output '================================================================'
+Say ''
+Say '================================================================'
 
 $ctrl    = @($results | Where-Object { $_.Group -eq 'control' })
 $ctrlOk  = @($ctrl | Where-Object { $_.Reached })
@@ -223,36 +279,36 @@ $named = @($issuers | Where-Object { $i = $_; ($inspectors | Where-Object { $i -
 $collapsed = ($withCert.Count -ge 4 -and $issuers.Count -eq 1)
 
 if ($collapsed -or $named.Count -gt 0) {
-    Write-Output ' TLS IS BEING INSPECTED.'
+    Say ' TLS IS BEING INSPECTED.'
     if ($named.Count -gt 0) {
-        Write-Output "   The certificates name it: $($named -join ', ')"
+        Say "   The certificates name it: $($named -join ', ')"
     } else {
-        Write-Output "   All $($withCert.Count) hosts presented a certificate from the same"
-        Write-Output "   issuer ($($issuers -join ', ')), which cannot happen naturally - they"
-        Write-Output '   are behind different CDNs with different CAs.'
+        Say "   All $($withCert.Count) hosts presented a certificate from the same"
+        Say "   issuer ($($issuers -join ', ')), which cannot happen naturally - they"
+        Say '   are behind different CDNs with different CAs.'
     }
-    Write-Output '   Something on this network decrypts HTTPS. Consequences:'
-    Write-Output '     - swapping hostnames to dodge a block will NOT work; the proxy'
-    Write-Output '       reads the whole request, not just the name.'
-    Write-Output '     - whoever runs that proxy can allow a host by category or by'
-    Write-Output '       name, which is the only thing that will help.'
-    Write-Output '     - it also explains large downloads being slow or truncated.'
-    Write-Output ''
+    Say '   Something on this network decrypts HTTPS. Consequences:'
+    Say '     - swapping hostnames to dodge a block will NOT work; the proxy'
+    Say '       reads the whole request, not just the name.'
+    Say '     - whoever runs that proxy can allow a host by category or by'
+    Say '       name, which is the only thing that will help.'
+    Say '     - it also explains large downloads being slow or truncated.'
+    Say ''
 }
 elseif ($withCert.Count -ge 4) {
-    Write-Output " No sign of TLS interception: $($issuers.Count) different certificate issuers"
-    Write-Output '   across these hosts, which is what an unmolested connection looks like.'
-    Write-Output ''
+    Say " No sign of TLS interception: $($issuers.Count) different certificate issuers"
+    Say '   across these hosts, which is what an unmolested connection looks like.'
+    Say ''
 }
 
 if ($ctrl.Count -gt 0 -and $ctrlOk.Count -eq 0) {
-    Write-Output ' THE CONTROLS FAILED, so read nothing else here as meaningful.'
-    Write-Output '   Even example.com and Modrinth could not be reached, which means'
-    Write-Output '   this machine has no general internet right now - or the network'
-    Write-Output '   is allow-list only. Nothing we host anywhere will be reachable.'
-    Write-Output '   Fix that first; the LAN route (copy from the host) is the answer'
-    Write-Output '   in the meantime, and it needs no internet at all.'
-    Write-Output ''
+    Say ' THE CONTROLS FAILED, so read nothing else here as meaningful.'
+    Say '   Even example.com and Modrinth could not be reached, which means'
+    Say '   this machine has no general internet right now - or the network'
+    Say '   is allow-list only. Nothing we host anywhere will be reachable.'
+    Say '   Fix that first; the LAN route (copy from the host) is the answer'
+    Say '   in the meantime, and it needs no internet at all.'
+    Say ''
 }
 
 # ---- Minecraft ----
@@ -266,39 +322,39 @@ if ($mcRows.Count -gt 0) {
     $blocked   = @($needed | Where-Object { -not $_.Reached })
 
     if ($blocked.Count -eq 0) {
-        Write-Output ' MINECRAFT: everything an install needs is reachable from here.'
-        Write-Output '   So a download failure is not this machine being blocked - look at'
-        Write-Output '   whether java.exe itself is filtered (Diagnose-MinecraftNet.ps1).'
+        Say ' MINECRAFT: everything an install needs is reachable from here.'
+        Say '   So a download failure is not this machine being blocked - look at'
+        Say '   whether java.exe itself is filtered (Diagnose-MinecraftNet.ps1).'
     }
     else {
-        Write-Output " MINECRAFT blocked: $(($blocked | ForEach-Object { $_.Host }) -join ', ')"
+        Say " MINECRAFT blocked: $(($blocked | ForEach-Object { $_.Host }) -join ', ')"
 
         if ($mojangAll.Count -gt 0 -and $mojang.Count -eq 0 -and $mcnet.Count -gt 0) {
-            Write-Output '   Shape: mojang.com is blocked, minecraft.net is not. The libraries'
-            Write-Output '   and assets - nearly all of the bytes - are fine; only the manifest'
-            Write-Output '   and the client jar need another route.'
+            Say '   Shape: mojang.com is blocked, minecraft.net is not. The libraries'
+            Say '   and assets - nearly all of the bytes - are fine; only the manifest'
+            Say '   and the client jar need another route.'
         }
         elseif ($mcnetAll.Count -gt 0 -and $mcnet.Count -eq 0 -and $mojang.Count -gt 0) {
-            Write-Output '   Shape: minecraft.net is blocked, mojang.com is not. The manifest and'
-            Write-Output '   client jar are fine. The 107 libraries can come from Maven Central'
-            Write-Output '   instead (95 byte-for-byte); the assets have no alternative source.'
+            Say '   Shape: minecraft.net is blocked, mojang.com is not. The manifest and'
+            Say '   client jar are fine. The 107 libraries can come from Maven Central'
+            Say '   instead (95 byte-for-byte); the assets have no alternative source.'
         }
         elseif ($mojang.Count -eq 0 -and $mcnet.Count -eq 0) {
-            Write-Output '   Shape: both domains are blocked. No alternative official source'
-            Write-Output '   helps. Copy versions\ in by hand, or route through a machine that'
-            Write-Output '   can reach them.'
+            Say '   Shape: both domains are blocked. No alternative official source'
+            Say '   helps. Copy versions\ in by hand, or route through a machine that'
+            Say '   can reach them.'
         }
 
         $dnsBlocked = @($blocked | Where-Object { $_.Dns -eq 'FAILED' -or $_.Dns -eq 'no A record' })
         if ($dnsBlocked.Count -gt 0) {
-            Write-Output '   At least one host does not resolve at all, so that block is at DNS.'
-            Write-Output '   A different hostname on the same domain will not help.'
+            Say '   At least one host does not resolve at all, so that block is at DNS.'
+            Say '   A different hostname on the same domain will not help.'
         } else {
-            Write-Output '   The blocked hosts resolve but will not connect, so something is'
-            Write-Output '   filtering rather than DNS - a firewall, a proxy or antivirus.'
+            Say '   The blocked hosts resolve but will not connect, so something is'
+            Say '   filtering rather than DNS - a firewall, a proxy or antivirus.'
         }
     }
-    Write-Output ''
+    Say ''
 }
 
 # ---- fabric ----
@@ -307,23 +363,23 @@ if ($fabRows.Count -gt 0) {
     $fabOk = @($fabRows | Where-Object { $_.Reached })
 
     if ($fabOk.Count -eq $fabRows.Count) {
-        Write-Output ' FABRIC: this machine can install a loader by itself.'
-        Write-Output '   So keeping the loader up to date can happen on each machine'
-        Write-Output '   directly, and the host does not have to make and serve a pack.'
+        Say ' FABRIC: this machine can install a loader by itself.'
+        Say '   So keeping the loader up to date can happen on each machine'
+        Say '   directly, and the host does not have to make and serve a pack.'
     }
     elseif ($fabOk.Count -eq 0) {
-        Write-Output ' FABRIC: blocked. This machine cannot install a loader on its own.'
-        Write-Output '   Updating the loader here has to go through a pack made on a'
-        Write-Output '   machine that can reach Fabric - which is what the Mods tab'
-        Write-Output '   MAKE A PACK / OPEN A PACK flow is for.'
+        Say ' FABRIC: blocked. This machine cannot install a loader on its own.'
+        Say '   Updating the loader here has to go through a pack made on a'
+        Say '   machine that can reach Fabric - which is what the Mods tab'
+        Say '   MAKE A PACK / OPEN A PACK flow is for.'
     }
     else {
-        Write-Output " FABRIC: partly reachable - $(($fabOk | ForEach-Object { $_.Host }) -join ', ') only."
-        Write-Output '   That is the worst case to leave alone: the version list can be'
-        Write-Output '   read while the library jars cannot, so an install would start'
-        Write-Output '   and fail part-way. Treat it as blocked and use a pack.'
+        Say " FABRIC: partly reachable - $(($fabOk | ForEach-Object { $_.Host }) -join ', ') only."
+        Say '   That is the worst case to leave alone: the version list can be'
+        Say '   read while the library jars cannot, so an install would start'
+        Say '   and fail part-way. Treat it as blocked and use a pack.'
     }
-    Write-Output ''
+    Say ''
 }
 
 # ---- hosting ----
@@ -332,30 +388,30 @@ if ($hostRows.Count -gt 0) {
     $ok = @($hostRows | Where-Object { $_.Reached })
     $no = @($hostRows | Where-Object { -not $_.Reached })
 
-    Write-Output ' HOSTING'
+    Say ' HOSTING'
     if ($ok.Count -gt 0) {
-        Write-Output "   Reachable: $(($ok | ForEach-Object { $_.Host }) -join ', ')"
+        Say "   Reachable: $(($ok | ForEach-Object { $_.Host }) -join ', ')"
     }
     if ($no.Count -gt 0) {
-        Write-Output "   Not reachable: $(($no | ForEach-Object { $_.Host }) -join ', ')"
+        Say "   Not reachable: $(($no | ForEach-Object { $_.Host }) -join ', ')"
     }
-    Write-Output ''
+    Say ''
 
     $gh    = @($hostRows | Where-Object { $_.Host -like '*github*' })
     $ghOk  = @($gh | Where-Object { $_.Reached })
     $assets = @($hostRows | Where-Object { $_.Host -eq 'objects.githubusercontent.com' -and $_.Reached })
 
     if ($gh.Count -gt 0 -and $ghOk.Count -eq 0) {
-        Write-Output '   GitHub is blocked outright, as expected. Releases are out.'
+        Say '   GitHub is blocked outright, as expected. Releases are out.'
     } elseif ($ghOk.Count -gt 0 -and $assets.Count -eq 0) {
-        Write-Output '   github.com works but objects.githubusercontent.com does not, so'
-        Write-Output '   Release ASSETS would still fail - that is where the bytes come from.'
-        Write-Output '   Worth knowing: this is the one case that looks like it works and'
-        Write-Output '   then does not.'
+        Say '   github.com works but objects.githubusercontent.com does not, so'
+        Say '   Release ASSETS would still fail - that is where the bytes come from.'
+        Say '   Worth knowing: this is the one case that looks like it works and'
+        Say '   then does not.'
     } elseif ($assets.Count -gt 0) {
-        Write-Output '   GitHub Releases would work from this machine after all - both'
-        Write-Output '   github.com and the asset host are reachable. Re-test before relying'
-        Write-Output '   on it, since a filter can be changed at any time.'
+        Say '   GitHub Releases would work from this machine after all - both'
+        Say '   github.com and the asset host are reachable. Re-test before relying'
+        Say '   on it, since a filter can be changed at any time.'
     }
 
     # The thing they would actually use is a custom domain in front of R2, and
@@ -363,31 +419,51 @@ if ($hostRows.Count -gt 0) {
     $cf = @($hostRows | Where-Object { $_.Host -eq 'cloudflare.com' -and $_.Reached })
     $r2 = @($hostRows | Where-Object { $_.Host -eq 'r2.cloudflarestorage.com' -and $_.Reached })
     if ($cf.Count -gt 0 -or $r2.Count -gt 0) {
-        Write-Output ''
-        Write-Output '   Cloudflare answers here, which is a good sign for R2 - but note'
-        Write-Output '   what this does and does not prove. A real deployment would put'
-        Write-Output '   your own domain in front of the bucket, and a brand-new domain'
-        Write-Output '   cannot be tested until it exists. These rows say Cloudflare itself'
-        Write-Output '   is not blocked; they do not promise your eventual hostname is not.'
+        Say ''
+        Say '   Cloudflare answers here, which is a good sign for R2 - but note'
+        Say '   what this does and does not prove. A real deployment would put'
+        Say '   your own domain in front of the bucket, and a brand-new domain'
+        Say '   cannot be tested until it exists. These rows say Cloudflare itself'
+        Say '   is not blocked; they do not promise your eventual hostname is not.'
     }
 
     $stores = @($hostRows | Where-Object {
         $_.Reached -and ($_.Host -like '*amazonaws*' -or $_.Host -like '*googleapis*' -or $_.Host -like '*blob.core.windows.net')
     })
     if ($stores.Count -gt 0) {
-        Write-Output ''
-        Write-Output "   Big object stores reachable: $(($stores | ForEach-Object { $_.Host }) -join ', ')"
-        Write-Output '   These are the safest bet against a category filter, because'
-        Write-Output '   blocking them breaks a great deal of unrelated traffic.'
+        Say ''
+        Say "   Big object stores reachable: $(($stores | ForEach-Object { $_.Host }) -join ', ')"
+        Say '   These are the safest bet against a category filter, because'
+        Say '   blocking them breaks a great deal of unrelated traffic.'
     }
 
-    Write-Output ''
-    Write-Output '   Remember the cheapest answer: once ONE machine has the payload, every'
-    Write-Output '   other machine can pull it from that host over the LAN, where no filter'
-    Write-Output '   applies. An internet source is only needed for the first machine at a'
-    Write-Output '   site - and a USB stick does that job today.'
+    Say ''
+    Say '   Remember the cheapest answer: once ONE machine has the payload, every'
+    Say '   other machine can pull it from that host over the LAN, where no filter'
+    Say '   applies. An internet source is only needed for the first machine at a'
+    Say '   site - and a USB stick does that job today.'
 }
 
-Write-Output '================================================================'
-Write-Output ''
-Write-Output 'Copy all of the above. See HANDOFF.md section 12.'
+Say '================================================================'
+Say ''
+Say 'See HANDOFF.md section 12.'
+Say ''
+
+# Added before the file is written, so the report says where it is too.
+$script:report.Add('')
+$script:report.Add('A copy of all of the above was saved to:')
+$script:report.Add("  $Out")
+
+if (SaveReport) {
+    Write-Output 'A copy of all of that has been saved to:'
+    Write-Output "  $Out"
+    Write-Output ''
+    Write-Output 'Send that file rather than retyping any of it.'
+}
+
+# Without this, running the script by double-clicking it closes the window the
+# instant it finishes and the results are gone.
+if (-not $NoPause -and -not [Console]::IsOutputRedirected) {
+    Say ''
+    Read-Host 'Press Enter to close'
+}

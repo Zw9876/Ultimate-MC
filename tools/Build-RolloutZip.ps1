@@ -68,6 +68,8 @@ $hostOnly = @(
     'backups'
     'launcher_errors.txt'
     'update-watcher.log'
+    'download-hosts-report.txt'
+    'antivirus-report.txt'
     'config.txt'
     'computer_uuid.dat'
 )
