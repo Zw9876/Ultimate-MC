@@ -1088,9 +1088,14 @@ once before the host can close it for them.
 
 What is genuinely outstanding:
 
-0. **Put the current build on the host.** Everything below matters less than this: it is
+0. **Put 1.2.286.213 on the host.** Everything below matters less than this: it is
    what turns rollout from a chore into something that happens by itself — and it is
    now also what makes the fleet visible instead of guessed at.
+
+   **Until the fleet has this build, pausing and blocking reach nobody.** That is not
+   a bug and it is now visible: a client older than 1.2.285.145 does not understand a
+   pause, 1.2.285.114 a block, and the FLEET panel says how many cannot obey. See the
+   pause entry in section 5.
 
    **Be honest about what is actually out there, because it is not known.** The last
    build confirmed to have reached the machines is **1.2.265.376**. Everything since
@@ -1123,9 +1128,26 @@ What is genuinely outstanding:
    on or Defender eating the swap — not the mechanism. `update-watcher.log` beside
    each launcher says which.
 
-1. **Run the network diagnostic on a machine where Minecraft cannot reach the
-   internet.** `tools\Diagnose-MinecraftNet.ps1` (copy the whole `tools\` folder
-   across; it finds `runtime\` itself):
+1. **Run `tools\Test-DownloadHosts.ps1` on a workstation.** This is the live next
+   step and three other things wait on it: whether an installer can fetch its payload
+   from the internet at all, where that payload could be hosted, and whether clients
+   can install a Fabric loader themselves or need the host to serve a pack. It probes
+   the four Minecraft hosts, both Fabric hosts, GitHub's four, Cloudflare/R2, S3, GCS,
+   Azure Blob and archive.org, with `example.com` and Modrinth as controls, and
+   reports DNS, a TLS handshake with SNI and the certificate issuer per host.
+
+   It **saves its own output** to `download-hosts-report.txt` beside the launcher and
+   waits for Enter before closing — the first run was lost because the window shut on
+   it. Send that file.
+
+   **What is known already:** GitHub is reported blocked on the workstations while
+   Modrinth works, which is the signature of a category filter rather than no
+   internet. Everything is reachable from the build machine, Mojang included, so
+   anything the workstations cannot reach is specific to their network.
+
+   Then, separately, for Minecraft downloads failing:
+   `tools\Diagnose-MinecraftNet.ps1` (copy the whole `tools\` folder across; it finds
+   `runtime\` itself):
 
    ```
    powershell -ExecutionPolicy Bypass -File tools\Diagnose-MinecraftNet.ps1 -Server <address> -Port 25565
@@ -1193,13 +1215,14 @@ What is genuinely outstanding:
    pre-generated. Nothing general is left to tune at that point; the next step is
    profiling to find the specific mod or contraption. Not installed on any server.
 
-7. **PLAY discovers the host twice.** The required-mods check and the skin server each
-   run their own UDP discovery, so a machine with no host pays the 1500 ms
-   `ProbeWindow` twice before the game starts. Neither is wrong on its own; together
-   they are the bulk of the launch delay. The fix is to discover once per session and
-   share the answer — `MainWindow` already does a lookup at startup for updates, so
-   there is somewhere obvious to keep it. Measured, not guessed: hashing and reading
-   the whole 34 MB mods folder is 0.3 s, so discovery is what the time goes on.
+7. **PLAY discovers the host twice** — **half fixed on 2026-10-12.**
+   `MainWindow.HostForThisLaunchAsync` now resolves the host once per launch and hands
+   it to both the play-block check and the required-mods check, so adding the block
+   gate cost nothing and PLAY is one probe better than it was. The **skin server still
+   runs its own discovery** inside `ClientLauncher`, so a machine with no host on the
+   LAN still pays the 1500 ms `ProbeWindow` once. Finishing it means handing the same
+   answer into the launch path. Measured, not guessed: hashing and reading the whole
+   34 MB mods folder is 0.3 s, so discovery is where the time goes.
 
 8. **Requiring a mod before someone can *join*** — asked about 2026-09-28, researched,
    nothing built. **Superseded in practice** by the required-mods feature in section 5,

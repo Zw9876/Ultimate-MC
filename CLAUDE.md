@@ -38,15 +38,34 @@ section 5 — read it there rather than expecting a summary here.
 Built and tested here but **never run on the real machines**: the crash report
 viewer, mod update checking against Modrinth, "Delete disabled", Fabric loader
 packs for servers, required mods, world backups, the fleet list, crash reports
-reaching the host, and — new on 2026-10-12 — turning playing off for one machine,
-pausing everyone at once, and keeping everyone's Fabric loader on a pinned version. They are covered by tests and by
-driving the real UI; they have not met twenty machines and a Friday evening. Also
-section 5.
+reaching the host, and turning playing off for one machine. Covered by tests and
+by driving the real UI; they have not met twenty machines and a Friday evening.
+Also section 5.
+
+Two have now met reality, and both taught something:
+
+- **Pausing everyone was used in earnest on 2026-10-13 and somebody kept
+  playing.** The host side was fine; the fleet predated the feature. A client
+  older than 1.2.285.145 does not know the `paused` field exists, and a game
+  already running keeps its old watcher even after that client updates. Measured
+  side by side afterwards (`Verify-Pause.ps1 -OldLauncher`), and the host is now
+  warned when machines cannot obey. **It will not reliably work until the fleet
+  has caught up** — the FLEET panel says when it has.
+- **The Fabric loader policy is switched on here and really upgraded this host's
+  server**, 0.19.3 to 0.19.5, proved by starting it: *"Loading Minecraft 26.1.2
+  with Fabric Loader 0.19.5 … Done (1.288s)"*. Not yet proven on anyone else's
+  machine.
 
 The Admin tab is the former hidden REQUIRED tab, now holding three sub-tabs
 (required mods, fleet, crash reports) and still gated on nothing but `admin.flag`
 sitting beside the launcher. **Never ship that file** — section 8 has the full list
-of host-only files the rollout zip must leave out.
+of host-only files the rollout zip must leave out, and
+`tools\Build-RolloutZip.ps1` refuses to write an update zip containing any of them.
+
+The FLEET sub-tab carries the pause/block controls and the Fabric loader policy.
+Its counts are scoped to machines seen **since this launcher opened**, because the
+roster accumulates and a machine last seen days ago was otherwise voting on whether
+tonight's fleet is caught up.
 
 Two things are worth carrying in your head because they shape decisions:
 
