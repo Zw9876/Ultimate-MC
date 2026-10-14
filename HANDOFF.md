@@ -424,6 +424,15 @@ including where WebView2 is loaded from — depends on it.
   block is gone is the shape of bug where somebody is told they can play and then
   cannot, with nothing on screen to explain it.
 
+  - **You give a player's name; the computer is looked up from it.** Changed
+    2026-10-13 — it used to ask for a computer name, which nobody knows for anybody
+    but themselves. `FleetRoster.LastPlayedOn` finds the machine that most recently
+    reported that name, the dialog shows which one it resolved to as you type, and the
+    block is still applied to the *computer*. A name nobody has reported says so
+    plainly rather than appearing to work: there is no launcher to block, and only a
+    server-side ban by name is possible. When several machines have been used under
+    one name, the most recent is taken and the others are named rather than silently
+    ignored.
   - **Matched on the computer name *or* the Windows `MachineGuid`**, so renaming the
     computer does not escape it and neither does reinstalling the launcher. Defeating
     it needs local admin. A deliberately rejected option was an SMBIOS hardware
@@ -1614,6 +1623,26 @@ Do not "restore fidelity" on these — the PowerShell behavior was wrong.
   (section 13). The verification script read on past it and reported empty labels.
   `launcher_errors.txt` had the answer the whole time — read it first.
 
+- **A fixed-height window with a star row squeezes a control to nothing — or draws
+  over it.** The block dialog was `Height="560"` with the reason card on `Height="*"`.
+  The content needed more than 560, so the star row was squeezed, the text box kept
+  its `MinHeight` and overflowed, and the confirm button was painted on top of it.
+  Reported as "there is a section for a reason but no box to type in", and that is
+  exactly what it looked like. Measured: box at `y=739 h=54`, confirm button at
+  `y=732`.
+
+  **"The control exists" would have passed.** `Verify-Admin.ps1` now asserts the
+  *geometry* — that the box has real height, that nothing below it starts above its
+  bottom edge, and that it fits inside the window — and then types into it. Prefer
+  `SizeToContent="Height"` with every row `Auto` and a `ScrollViewer`, which cannot
+  do this at all.
+
+- **`ValuePattern.SetValue` on an editable `ComboBox` does not update
+  `ComboBox.Text`.** The player-name lookup read `Text`, got an empty string, and
+  silently did nothing — and because nothing could set the value from a test, the
+  behaviour was unverifiable either way. Replaced with a plain `TextBox` plus a
+  separate picker for known names. Less clever, completely predictable, and drivable.
+
 - **Setting a control's text and then overwriting it later in the same method.**
   The too-old warning was *prepended* to `FleetNote.Text` a dozen lines before the
   line that assigns `FleetNote.Text` outright, so it was computed, written and
@@ -1778,7 +1807,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **822 offline checks in about 6 seconds**, and around 910 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
+`MinecraftLauncher.Tests/` — **841 offline checks in about 7 seconds**, and around 930 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
 
 ```powershell
 tools\run-tests.ps1                 # everything

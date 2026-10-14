@@ -419,6 +419,78 @@ if ($loaderBtn) {
     }
 }
 
+# ---- the block dialog: geometry and name lookup -----------------
+#
+# Geometry is asserted, not presence. The reason box WAS in the tree and
+# unreachable: the window was a fixed 560 tall with the reason card on a star
+# row, so the row was squeezed, the box kept its MinHeight and overflowed, and
+# the confirm button was painted on top of it. Measured at the time: box at
+# y=739 h=54, button at y=732. "The control exists" would have passed.
+
+Click (ById $w 'FleetBlockButton')
+Start-Sleep -Seconds 3
+
+$bd = $root.FindFirst([Windows.Automation.TreeScope]::Descendants,
+    (New-Object Windows.Automation.PropertyCondition(
+        [Windows.Automation.AutomationElement]::NameProperty, 'Turn playing off')))
+
+Check 'the block dialog opens' ($null -ne $bd) 'no window titled "Turn playing off"'
+
+if ($bd) {
+    $box = ById $bd 'ReasonBox'
+    $chk = ById $bd 'ServerBanCheck'
+    $btn = ById $bd 'BlockButton'
+
+    Check 'it has a reason box' ($null -ne $box) 'ReasonBox not in the tree'
+
+    if ($box -and $chk -and $btn) {
+        $r = $box.Current.BoundingRectangle
+        $c = $chk.Current.BoundingRectangle
+        $b = $btn.Current.BoundingRectangle
+        $d = $bd.Current.BoundingRectangle
+
+        Write-Output ("  reason box: y=" + [int]$r.Y + " h=" + [int]$r.Height +
+                      "  checkbox y=" + [int]$c.Y + "  button y=" + [int]$b.Y)
+
+        Check 'the reason box has real height' ($r.Height -ge 40) $r.Height
+        Check 'nothing is drawn on top of it' `
+              (($c.Y -ge ($r.Y + $r.Height)) -and ($b.Y -ge ($r.Y + $r.Height))) `
+              ("box bottom " + [int]($r.Y + $r.Height) + ", checkbox " + [int]$c.Y + ", button " + [int]$b.Y)
+        Check 'and it fits inside the window' `
+              (($r.Y + $r.Height) -le ($d.Y + $d.Height)) 'it overflows the window'
+
+        # Typeable, not merely present.
+        $vp = $box.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
+        $vp.SetValue('verification run')
+        Check 'a reason can actually be typed into it' ($vp.Current.Value -eq 'verification run') $vp.Current.Value
+    }
+
+    # Asks for a PLAYER name and finds the computer itself -- nobody knows their
+    # colleagues' computer names, which is what it used to ask for.
+    $nameBox = ById $bd 'PlayerNameBox'
+    Check 'it asks for a player name' ($null -ne $nameBox) 'PlayerNameBox not in the tree'
+
+    if ($nameBox) {
+        $nv = $nameBox.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
+
+        $nv.SetValue('Steve')
+        Start-Sleep -Seconds 1
+        $note = (ById $bd 'WhoNote').Current.Name
+        Write-Output ("  'Steve' -> " + $note.Substring(0, [Math]::Min(120, $note.Length)))
+        Check 'a player name resolves to their computer' ($note -match 'TEST-BENCH-01') $note
+
+        $nv.SetValue('Nobody At All')
+        Start-Sleep -Seconds 1
+        $note = (ById $bd 'WhoNote').Current.Name
+        Check 'and an unknown name says so plainly' ($note -match 'No computer has reported') $note
+        Check 'rather than appearing to work' (-not ($note -match 'TEST-BENCH')) $note
+    }
+
+    # Cancel: this must not actually block anybody.
+    Click (ById $bd 'CancelButton')
+    Start-Sleep -Seconds 2
+}
+
 Check 'there is a way to empty the list entirely' ($null -ne (ById $w 'FleetForgetAllButton')) 'no forget-all button'
 
 Check 'the fleet tab offers a way to turn playing off' ($null -ne (ById $w 'FleetBlockButton')) 'no block button'

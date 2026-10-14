@@ -226,6 +226,47 @@ namespace MinecraftLauncher.Core
                 Machines = listing.Machines.Where(m => m.Seen >= sinceUtc).ToList()
             };
 
+        /// <summary>
+        /// Every machine that has reported playing under a given name, most recent first.
+        /// </summary>
+        /// <remarks>
+        /// The roster records the name somebody last played under, so this is the way
+        /// round from "who did it" to "which computer" — which is how a person actually
+        /// thinks about it. Nobody knows their colleagues' computer names.
+        ///
+        /// More than one machine can have been used under one name, and the list is
+        /// returned whole rather than reduced, so the caller can say so instead of
+        /// silently picking.
+        /// </remarks>
+        public static List<Machine> WhoPlayedAs(Listing listing, string? username)
+        {
+            if (string.IsNullOrWhiteSpace(username)) return new List<Machine>();
+
+            string want = username.Trim();
+
+            return listing.Machines
+                .Where(m => !string.IsNullOrWhiteSpace(m.Username) &&
+                            string.Equals(m.Username!.Trim(), want, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(m => m.Seen)
+                .ToList();
+        }
+
+        /// <summary>
+        /// The machine somebody is on now, or was on most recently. Null when no machine
+        /// has ever reported that name.
+        /// </summary>
+        public static Machine? LastPlayedOn(Listing listing, string? username) =>
+            WhoPlayedAs(listing, username).FirstOrDefault();
+
+        /// <summary>Every name the roster has seen, for offering them rather than typing.</summary>
+        public static List<string> KnownNames(Listing listing) =>
+            listing.Machines
+                .Where(m => !string.IsNullOrWhiteSpace(m.Username))
+                .OrderByDescending(m => m.Seen)
+                .Select(m => m.Username!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
         /// <summary>Forgets every machine. The hard reset, for when the list is junk.</summary>
         public static bool ForgetAll()
         {

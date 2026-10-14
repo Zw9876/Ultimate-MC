@@ -1384,53 +1384,66 @@ namespace MinecraftLauncher.UI
         /// </remarks>
         private void FleetBlock_Click(object sender, RoutedEventArgs e)
         {
+            var roster = FleetRoster.Load();
             var chosen = FleetList.SelectedItem as FleetRoster.Machine;
             bool serverUp = _serverSession?.IsRunning == true;
 
-            var dialog = new BlockWindow(chosen?.Name, chosen?.Guid, chosen?.Username, serverUp)
-            {
-                Owner = this
-            };
+            // Pre-filled from the selected row's PLAYER name, not its computer name:
+            // the dialog asks who, and looks the computer up itself.
+            var dialog = new BlockWindow(roster, chosen?.Username, serverUp) { Owner = this };
 
             if (dialog.ShowDialog() != true || dialog.Result is null) return;
             var choice = dialog.Result;
 
-            var blocks = PlayBlocks.LoadLocal();
-            var block = PlayBlocks.Set(
-                blocks, choice.Machine, choice.Guid, choice.Username,
-                choice.Reason, choice.Duration, FleetRoster.ThisMachine, DateTime.UtcNow);
+            var said = new List<string>();
 
-            if (!PlayBlocks.SaveLocal(blocks))
+            // No machine means no launcher block is possible — the dialog has already
+            // said so and refused unless a server ban was available, so this is the
+            // server-only path rather than a failure.
+            if (choice.Machine is { Length: > 0 })
             {
-                FleetStatus.Text = $"Could not write {PlayBlocks.FilePath}.";
-                return;
-            }
+                var blocks = PlayBlocks.LoadLocal();
+                var block = PlayBlocks.Set(
+                    blocks, choice.Machine, choice.Guid, choice.Username,
+                    choice.Reason, choice.Duration, FleetRoster.ThisMachine, DateTime.UtcNow);
 
-            var said = new List<string> { $"Playing is off on {block.Machine} ({block.UntilText})." };
+                if (!PlayBlocks.SaveLocal(blocks))
+                {
+                    FleetStatus.Text = $"Could not write {PlayBlocks.FilePath}.";
+                    return;
+                }
+
+                said.Add($"Playing is off for {choice.Username} on {block.Machine} " +
+                         $"({block.UntilText}).");
+            }
+            else
+            {
+                said.Add($"No computer is associated with {choice.Username}, so their " +
+                         "launcher was not blocked.");
+            }
 
             // The part that actually holds. Address first, because that is what
             // survives them picking a different username.
             if (choice.AlsoBanOnServer && _serverSession?.IsRunning == true)
             {
-                string? address = chosen?.Address;
+                // Taken from the machine the NAME resolved to, not from whichever row
+                // happened to be selected in the list — those can differ now.
+                string? address = FleetRoster.LastPlayedOn(roster, choice.Username)?.Address;
+                string why = choice.Reason ?? "blocked by the host";
 
                 if (!string.IsNullOrWhiteSpace(address))
                 {
-                    string why = choice.Reason ?? "blocked by the host";
                     _serverSession.SendCommand($"ban-ip {address} {why}");
                     said.Add($"Banned {address} on the server.");
                 }
                 else
                 {
-                    said.Add("No address on record for that machine, so no ban-ip was issued — " +
-                             "it has not checked in from this host yet.");
+                    said.Add("No address on record, so no ban-ip was issued — that machine " +
+                             "has not checked in from this host yet.");
                 }
 
-                if (!string.IsNullOrWhiteSpace(choice.Username))
-                {
-                    _serverSession.SendCommand($"ban {choice.Username} {choice.Reason ?? "blocked by the host"}");
-                    said.Add($"Banned {choice.Username} by name.");
-                }
+                _serverSession.SendCommand($"ban {choice.Username} {why}");
+                said.Add($"Banned {choice.Username} by name.");
             }
 
             FleetStatus.Text = string.Join(" ", said);

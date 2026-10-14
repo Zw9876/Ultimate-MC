@@ -33,6 +33,7 @@ namespace MinecraftLauncher.Tests
                 Counting();
                 Storing();
                 Scoping();
+                NameToMachine();
                 Inbox();
                 SendingOnce(sandbox);
             }
@@ -189,6 +190,69 @@ namespace MinecraftLauncher.Tests
             Expect("in hours", FleetRoster.Describe(TimeSpan.FromHours(5)), "5 h ago");
             Expect("yesterday", FleetRoster.Describe(TimeSpan.FromHours(30)), "yesterday");
             Expect("and in days", FleetRoster.Describe(TimeSpan.FromDays(9)), "9 days ago");
+        }
+
+        private static void NameToMachine()
+        {
+            Section("finding a computer from the name somebody plays under");
+
+            // This is the way round a person actually thinks: you know who did it, not
+            // which computer they were sitting at. The ban dialog used to ask for a
+            // computer name, which nobody knows for anyone but themselves.
+            var listing = new FleetRoster.Listing();
+            var now = new DateTime(2026, 10, 13, 20, 0, 0, DateTimeKind.Utc);
+
+            FleetRoster.Merge(listing, Report("DESKTOP-A", "Steve", "1.2.286.154"), "10.0.0.1", now);
+            FleetRoster.Merge(listing, Report("DESKTOP-B", "Alex",  "1.2.286.154"), "10.0.0.2", now.AddMinutes(-30));
+
+            var found = FleetRoster.LastPlayedOn(listing, "Steve");
+            Check("a name finds its computer", found is not null);
+            Expect("the right one", found!.Name, "DESKTOP-A");
+            Expect("and its address comes with it", found.Address, "10.0.0.1");
+
+            Check("case does not matter", FleetRoster.LastPlayedOn(listing, "steve")?.Name == "DESKTOP-A");
+            Check("nor does surrounding space",
+                  FleetRoster.LastPlayedOn(listing, "  Steve  ")?.Name == "DESKTOP-A");
+
+            Check("a name nobody has used finds nothing",
+                  FleetRoster.LastPlayedOn(listing, "Nobody") is null);
+            Check("an empty name finds nothing rather than the first machine",
+                  FleetRoster.LastPlayedOn(listing, "") is null);
+            Check("neither does whitespace", FleetRoster.LastPlayedOn(listing, "   ") is null);
+
+            // Somebody moving between machines: the most recent is the one that counts,
+            // and the caller is told there were others rather than it being hidden.
+            FleetRoster.Merge(listing, Report("DESKTOP-C", "Steve", "1.2.286.154"), "10.0.0.3", now.AddMinutes(10));
+
+            var all = FleetRoster.WhoPlayedAs(listing, "Steve");
+            Expect("both machines they used are returned", all.Count, 2);
+            Expect("most recent first", all[0].Name, "DESKTOP-C");
+            Expect("so that is the one a ban lands on",
+                   FleetRoster.LastPlayedOn(listing, "Steve")!.Name, "DESKTOP-C");
+
+            // A machine that has never reported a name must not be matched by anything.
+            FleetRoster.Merge(listing, Report("ANONYMOUS", launcher: "1.2.286.154"), null, now);
+            Check("a machine with no name is never matched",
+                  FleetRoster.WhoPlayedAs(listing, "ANONYMOUS").Count == 0);
+            Check("and does not appear under any name",
+                  FleetRoster.WhoPlayedAs(listing, "Steve").All(m => m.Name != "ANONYMOUS"));
+
+            // The names offered in the dialog, so it is a pick rather than a guess.
+            var names = FleetRoster.KnownNames(listing);
+            Note(string.Join(", ", names));
+            Check("every name seen is offered", names.Contains("Steve") && names.Contains("Alex"));
+            Expect("each one only once, however many machines used it", names.Count, 2);
+            Expect("most recently seen first", names[0], "Steve");
+            Check("a machine with no name contributes nothing",
+                  !names.Any(n => string.IsNullOrWhiteSpace(n)));
+
+            // Scoping and name lookup have to compose: banning somebody should work off
+            // the same window the panel counts.
+            var tonight = FleetRoster.Since(listing, now);
+            Check("a name still resolves within tonight's machines",
+                  FleetRoster.LastPlayedOn(tonight, "Steve")?.Name == "DESKTOP-C");
+            Check("but one only seen earlier does not",
+                  FleetRoster.LastPlayedOn(tonight, "Alex") is null);
         }
 
         private static void Scoping()

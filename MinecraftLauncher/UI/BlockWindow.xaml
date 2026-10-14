@@ -2,100 +2,114 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Turn playing off"
-        Height="560" Width="640"
+        Width="640"
+        SizeToContent="Height" MaxHeight="900"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Background="{StaticResource BgBrush}">
 
-    <Grid Margin="20">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+    <!-- SizeToContent="Height" with every row Auto, rather than a fixed height and a
+         star row. The previous version was 560 tall with the reason card on a star
+         row: the content needed more than that, so the row was squeezed, the text box
+         kept its MinHeight and overflowed, and the buttons were drawn on top of it.
+         The box was there and unreachable - measured at y=739 h=54 with the confirm
+         button at y=732. Nothing here can do that, and the ScrollViewer covers a
+         screen too short for the lot. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="Turn playing off" Style="{StaticResource TabTitle}"
-                   Margin="0,0,0,6"/>
+            <TextBlock Grid.Row="0" Text="Turn playing off" Style="{StaticResource TabTitle}"
+                       Margin="0,0,0,6"/>
 
-        <TextBlock Grid.Row="1" Margin="0,0,0,14"
-                   Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
-                   Text="Their launcher will refuse to start the game and will tell them why. They can still open the launcher, read the reason and update it."/>
+            <TextBlock Grid.Row="1" Margin="0,0,0,14"
+                       Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                       Text="Their launcher will refuse to start the game and will tell them why. They can still open the launcher, read the reason and update it."/>
 
-        <!-- == who == -->
-        <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,0,0,12">
-            <StackPanel>
-                <TextBlock Text="WHICH COMPUTER" Style="{StaticResource SectionLabel}"/>
-                <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11"
-                           TextWrapping="Wrap" Margin="0,2,0,10"
-                           Text="Filled in from the fleet list. You can type a computer name by hand for a machine that has never checked in. Matching is on the name OR the Windows identifier, so renaming the computer does not get round it."/>
+            <!-- == who == -->
+            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Text="WHO" Style="{StaticResource SectionLabel}"/>
+                    <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11"
+                               TextWrapping="Wrap" Margin="0,2,0,10"
+                               Text="The name they play under. Their computer is looked up from it, and the block follows the computer — so changing their name afterwards does not escape it."/>
 
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="10"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
+                    <!-- A plain TextBox and a separate picker, NOT an editable
+                         ComboBox. On an editable ComboBox, ComboBox.Text does not
+                         reliably reflect what has been typed at the moment the change
+                         fires, so the lookup read a stale value - and nothing could
+                         set it from a test either, so the behaviour was unverifiable.
+                         A TextBox is predictable and can be driven. -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="210"/>
+                        </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="COMPUTER NAME" Style="{StaticResource FieldLabel}"/>
-                        <TextBox x:Name="MachineBox" Height="30" Padding="6,5,0,0"/>
-                    </StackPanel>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="PLAYER NAME" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="PlayerNameBox" Height="30" Padding="6,5,0,0"
+                                     TextChanged="PlayerName_Changed"/>
+                        </StackPanel>
 
-                    <StackPanel Grid.Column="2">
-                        <TextBlock Text="PLAYING AS" Style="{StaticResource FieldLabel}"/>
-                        <TextBox x:Name="UsernameBox" Height="30" Padding="6,5,0,0"/>
-                    </StackPanel>
-                </Grid>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="OR PICK ONE SEEN" Style="{StaticResource FieldLabel}"/>
+                            <ComboBox x:Name="KnownNamesCombo" Height="30"
+                                      SelectionChanged="KnownName_Picked"/>
+                        </StackPanel>
+                    </Grid>
 
-                <TextBlock x:Name="IdentityNote" Foreground="{StaticResource MutedBrush}"
-                           FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                    <TextBlock x:Name="WhoNote" FontSize="11" TextWrapping="Wrap"
+                               Margin="0,10,0,0"
+                               Foreground="{StaticResource MutedBrush}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- == for how long == -->
+            <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Text="FOR HOW LONG" Style="{StaticResource SectionLabel}"/>
+                    <ComboBox x:Name="DurationCombo" Height="30" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- == why == -->
+            <Border Grid.Row="4" Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="REASON" Style="{StaticResource SectionLabel}"/>
+                    <TextBlock Foreground="{StaticResource MutedBrush}" FontSize="11"
+                               TextWrapping="Wrap" Margin="0,2,0,8"
+                               Text="Shown to them word for word. Worth filling in — somebody who is told why is far less likely to go looking for a way round it."/>
+
+                    <TextBox x:Name="ReasonBox" Height="64"
+                             AcceptsReturn="True" TextWrapping="Wrap" Padding="6,5,6,5"
+                             VerticalScrollBarVisibility="Auto"
+                             VerticalContentAlignment="Top"/>
+
+                    <CheckBox x:Name="ServerBanCheck" Margin="0,14,0,0"
+                              Foreground="{StaticResource TextBrush}"
+                              Content="Also ban them on the running server (ban-ip and the username)"
+                              ToolTip="This is the part that cannot be bypassed, because the server enforces it rather than their launcher"/>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,16,0,0">
+                <Button x:Name="BlockButton" Content="TURN PLAYING OFF" Width="190" Height="36"
+                        Margin="0,0,8,0" Click="Block_Click" Style="{StaticResource AccentButton}"/>
+                <Button x:Name="CancelButton" Content="Cancel" Width="110" Height="36"
+                        IsCancel="True" Click="Cancel_Click" Style="{StaticResource PlainButton}"/>
+                <TextBlock x:Name="StatusLabel" VerticalAlignment="Center" Margin="12,0,0,0"
+                           MaxWidth="280"
+                           Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
             </StackPanel>
-        </Border>
-
-        <!-- == for how long == -->
-        <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,0,0,12">
-            <StackPanel>
-                <TextBlock Text="FOR HOW LONG" Style="{StaticResource SectionLabel}"/>
-                <ComboBox x:Name="DurationCombo" Height="30" Margin="0,2,0,0"/>
-            </StackPanel>
-        </Border>
-
-        <!-- == why == -->
-        <Border Grid.Row="4" Style="{StaticResource Card}">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-
-                <TextBlock Grid.Row="0" Text="REASON" Style="{StaticResource SectionLabel}"/>
-                <TextBlock Grid.Row="1" Foreground="{StaticResource MutedBrush}" FontSize="11"
-                           TextWrapping="Wrap" Margin="0,2,0,8"
-                           Text="Shown to them word for word. Worth filling in — somebody who is told why is far less likely to go looking for a way round it."/>
-
-                <TextBox Grid.Row="2" x:Name="ReasonBox" MinHeight="54"
-                         AcceptsReturn="True" TextWrapping="Wrap" Padding="6,5,0,0"
-                         VerticalScrollBarVisibility="Auto"/>
-
-                <CheckBox Grid.Row="3" x:Name="ServerBanCheck" Margin="0,12,0,0"
-                          Foreground="{StaticResource TextBrush}"
-                          Content="Also ban them on the running server (ban-ip and the username)"
-                          ToolTip="This is the part that cannot be bypassed, because the server enforces it rather than their launcher"/>
-            </Grid>
-        </Border>
-
-        <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,16,0,0">
-            <Button x:Name="BlockButton" Content="TURN PLAYING OFF" Width="190" Height="36"
-                    Margin="0,0,8,0" Click="Block_Click" Style="{StaticResource AccentButton}"/>
-            <Button x:Name="CancelButton" Content="Cancel" Width="110" Height="36"
-                    Click="Cancel_Click" Style="{StaticResource PlainButton}"/>
-            <TextBlock x:Name="StatusLabel" VerticalAlignment="Center" Margin="12,0,0,0"
-                       Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
-        </StackPanel>
-    </Grid>
+        </Grid>
+    </ScrollViewer>
 </Window>
