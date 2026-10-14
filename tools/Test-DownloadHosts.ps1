@@ -62,7 +62,20 @@ $ErrorActionPreference = 'Continue'
 $ConnectTimeoutMs = 8000
 
 if (-not $Out) {
-    $Out = Join-Path (Split-Path -Parent $PSScriptRoot) 'download-hosts-report.txt'
+    # The report has to land somewhere the person running this will actually
+    # find, and this script gets run from two different places in practice:
+    # from tools\ beside the launcher, and on its own from the root of a USB
+    # stick. Writing blindly to the PARENT is right for the first and wrong for
+    # the second - it puts the report outside the folder, or fails outright at a
+    # drive root, where Split-Path -Parent returns nothing.
+    $here = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+    $up   = Split-Path -Parent $here
+
+    if ($up -and (Test-Path -LiteralPath (Join-Path $up 'MinecraftLauncher.exe'))) {
+        $Out = Join-Path $up 'download-hosts-report.txt'      # in tools\
+    } else {
+        $Out = Join-Path $here 'download-hosts-report.txt'    # standing alone
+    }
 }
 
 # Every line goes through Say, which prints it AND keeps it, and the whole lot is

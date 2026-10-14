@@ -68,3 +68,11 @@ launcher_errors.txt
 antivirus-report.txt
 # Written by tools\Test-DownloadHosts.ps1, likewise.
 download-hosts-report.txt
+
+# ── Transport copy ──
+# tools\Test-DownloadHosts.ps1 is also kept at the repo root, so it can be
+# dragged onto a USB stick on its own rather than copying the whole tools\
+# folder to a workstation. The copy in tools\ is the source; this one is
+# disposable and deliberately untracked. If the two ever drift, the SHA-256 in
+# a report's provenance stamp says which of them produced that report.
+/Test-DownloadHosts.ps1
