@@ -109,6 +109,13 @@ if ($hadFlag) { Remove-Item $flag -Force; Write-Output "  (moved admin.flag asid
 
 $hadBlocks = Test-Path $blocks
 if ($hadBlocks) { Move-Item $blocks "$blocks.verify-backup" -Force }
+
+# The old-client watcher checks ITSELF in -- 1.2.280.291 predates pausing but not
+# /launcher/checkin -- which otherwise leaves this machine recorded on an old
+# build and makes the host's own FLEET row lie about it.
+$roster = Join-Path $repo 'fleet.json'
+$hadRoster = Test-Path $roster
+if ($hadRoster) { Move-Item $roster "$roster.verify-backup" -Force }
 Remove-Item $cache -Force -ErrorAction SilentlyContinue
 
 Get-Process MinecraftLauncher -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -381,6 +388,8 @@ Remove-Item $cache -Force -ErrorAction SilentlyContinue
 if ($standInFile) { Remove-Item $standInFile -Force -ErrorAction SilentlyContinue }
 if ($hadConfig) { Move-Item $configBackup $config -Force; Write-Output "  (restored config.txt)" }
 if ($hadBlocks) { Move-Item "$blocks.verify-backup" $blocks -Force }
+Remove-Item $roster -Force -ErrorAction SilentlyContinue
+if ($hadRoster) { Move-Item "$roster.verify-backup" $roster -Force }
 if ($hadFlag) { New-Item -ItemType File $flag | Out-Null; Write-Output "  (put admin.flag back)" }
 
 $errors = Join-Path $repo 'launcher_errors.txt'
