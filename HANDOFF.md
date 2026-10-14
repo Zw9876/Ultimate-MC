@@ -1140,10 +1140,42 @@ What is genuinely outstanding:
    waits for Enter before closing — the first run was lost because the window shut on
    it. Send that file.
 
-   **What is known already:** GitHub is reported blocked on the workstations while
-   Modrinth works, which is the signature of a category filter rather than no
-   internet. Everything is reachable from the build machine, Mojang included, so
-   anything the workstations cannot reach is specific to their network.
+   **One run has come back (2026-10-14), and it does not mean what it appears to.**
+   The workstation reported GitHub blocked on all four hosts, both Cloudflare storage
+   endpoints blocked while `cloudflare.com` passed — a cloud-storage *category* block,
+   so R2 is out — and S3, GCS and Azure Blob reachable. Fabric reachable both hosts,
+   which means clients can install their own loader and the host need not serve packs.
+
+   But **Mojang came back `TLS refused` on a direct socket and `HTTP 200` at the same
+   time**, and meanwhile the **Setup tab on those machines cannot download versions at
+   all.** A direct connection being refused while an HTTP request to the same host and
+   port succeeds means that request went through a **proxy** — and the two stacks are
+   not the same one:
+
+   | | |
+   |---|---|
+   | the probe | PowerShell 5.1, i.e. **.NET Framework**. `HttpWebRequest` picks up WinINET/IE proxy settings by itself. |
+   | the launcher | **.NET 10**, and `Core/Downloader.cs:19` is a bare `new HttpClient()` — no proxy, no proxy credentials. |
+
+   So the probe may have proved only that *PowerShell* can reach Mojang. **Untested
+   hypothesis, not a finding.** `Test-DownloadHosts.ps1` now has a PROXY section that
+   settles it: it dumps the WinINET keys, `netsh winhttp show proxy`, WPAD and the
+   resolved route per URL, then fetches the same Mojang URL three ways — direct, via
+   the system proxy, and via the proxy with default credentials — and says which of
+   those the launcher's situation matches.
+
+   **If it is the proxy**, the fix is one shared HTTP factory in `Core/` covering all
+   **ten** `new HttpClient()` call sites — and it must **bypass local addresses**,
+   because `FleetClient`, `PlayBlocksClient`, `SkinDiscovery`, `LauncherUpdate` and
+   `GameWatcher` all talk to the host on the LAN and routing those through a proxy
+   would break check-ins, self-update and play blocks.
+
+   **If it is not**, versions and Java come from the **host over the LAN** instead:
+   it downloads once and serves them, which no filter on a workstation applies to.
+   That is the design to prefer anyway — see item 1a.
+
+   Everything is reachable from the build machine, Mojang included, so anything the
+   workstations cannot reach is specific to their network.
 
    Then, separately, for Minecraft downloads failing:
    `tools\Diagnose-MinecraftNet.ps1` (copy the whole `tools\` folder across; it finds
@@ -1159,10 +1191,40 @@ What is genuinely outstanding:
    rerouting helps**. Anything else and `tools\Relay.java` becomes useful (a plain
    TCP relay, verified carrying real Minecraft protocol bytes).
 
-   **Strongest evidence so far:** the user found the Modrinth launcher can download
-   *mods* but not *Minecraft*. That launcher is a Rust app, not Java — so the block
-   looks like Mojang domains rather than `java.exe`. Worth confirming before
-   building anything on top of it.
+   **Strongest evidence so far, and it now converges.** The Modrinth launcher on
+   these machines downloads *mods* but not *Minecraft*. It is a Rust app, not Java,
+   so this was already enough to rule out `java.exe` being the filtered thing. Put it
+   beside the other two observations and they all say the same thing:
+
+   | Client | Uses WinINET proxy settings? | Mojang | Modrinth |
+   |---|---|---|---|
+   | this probe (.NET Framework) | yes | **works** | works |
+   | Modrinth launcher (Rust) | no | **fails** | works |
+   | our launcher (.NET 10, bare `HttpClient`) | no | **fails** | works (Mods tab) |
+
+   Three independent clients, and the only one that reaches Mojang is the only one
+   that uses the system proxy. Modrinth works for all three, which is why this is not
+   "the internet is blocked" — it is **direct egress to Mojang** that is blocked, with
+   a proxy that permits it. Still a hypothesis, but a well-cornered one, and the PROXY
+   section is built to confirm or kill it in a single run.
+
+1a. **Host-served Minecraft versions and Java runtimes.** Worth building whichever way
+   the proxy question lands, because it is what makes a user-facing version picker work
+   on locked-down machines. The pieces already exist: `MojangManifest` reads the version
+   list, `VersionInstaller` installs jar + libraries + assets, `ClientLauncher:99-106`
+   already reads `javaVersion.majorVersion` out of the version JSON, and `Paths.FindJava`
+   already expects `runtime\<major>\bin\java.exe`. What is missing is **acquiring** a
+   Java the machine does not have. Two traps come with it:
+
+   - `Paths.FindJava` (`Paths.cs:102`) falls back to **any** Java, newest first. Harmless
+     today; the moment versions are user-selectable it silently runs 1.7.10 on Java 25.
+     Make it strict once Java can be downloaded.
+   - **Java 8 is not installed** — `runtime\` holds 17, 21 and 25 — so **1.16 and older cannot run**
+     on any machine. A full version list needs `jre-legacy`.
+
+   Also unprobed: `maven.minecraftforge.net` and `maven.neoforged.net`. Fabric is
+   confirmed, so a picker can honestly offer vanilla and Fabric; Forge and NeoForge are
+   unknown until those two rows are added.
 
 2. **Pre-generate the worlds.** Still the biggest remaining cause of the host
    struggling, and still operational rather than code — but no longer a matter of
@@ -1259,6 +1321,38 @@ WPF code-behind thin.
 
 ---
 ## 11. Notable gotchas learned the hard way (so they aren't rediscovered)
+
+### A diagnostic report that mixed two machines, and the hour spent hunting a bug that was never there
+
+A `download-hosts-report.txt` was read in which the hosting **table** marked seven
+hosts `refused` while the **summary** below it called all twelve reachable and
+concluded "GitHub Releases would work from this machine after all". That looked
+exactly like a bug in `Test-DownloadHosts.ps1` — a `Reachable:` list computed from
+DNS instead of the handshake — and it was reported as one.
+
+It was not. The logic was identical in every committed version, and a harness fed the
+verdict section the exact reachability the table showed: it prints `Reachable: 5`,
+`Not reachable: 7`, "GitHub is blocked outright, as expected." Running the script on
+the build machine then produced a summary **byte-identical** to the one in the file.
+
+The report held the workstation's tables and the build machine's summary — two runs,
+one file, and **nothing in either half said which machine it came from**.
+
+Two lessons, and the second is the general one:
+
+- Reports now carry a provenance stamp: computer, user, timestamp, Windows version,
+  **the PowerShell and .NET version**, and a SHA-256 of the script that produced them.
+  The .NET line is not decoration — .NET Framework and .NET 10 handle proxies
+  differently, which is the live hypothesis for the Setup tab failing, so a report that
+  does not say which stack it used is answering a different question than the one asked.
+- The tables now print the `OK` column that the verdicts are actually computed from, so
+  "do the summary and the table even describe the same data" is answerable by looking.
+
+And the process lesson: **the contradiction was the evidence, not the noise.** The same
+report had Mojang as `TLS refused` with `HTTP 200`, which was waved at as an artifact.
+It is the fingerprint of a proxy, and it is probably why the Setup tab cannot download
+versions. Section 10 item 1.
+
 
 - **XML comments cannot contain `--`** — broke the csproj twice.
 - **The app.manifest `<assembly>` element** must not have stray attributes — a typo

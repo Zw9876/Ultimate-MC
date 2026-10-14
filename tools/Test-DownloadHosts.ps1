@@ -82,6 +82,18 @@ function Say($text = '') {
     }
 }
 
+# Identifies the exact script that produced a report, so two runs of different
+# vintages cannot be mistaken for each other.
+function ScriptFingerprint {
+    try {
+        if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {
+            $h = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
+            return "$(Split-Path -Leaf $PSCommandPath) SHA256 $($h.Substring(0,16))"
+        }
+    } catch { }
+    return 'unknown (not run from a file)'
+}
+
 function SaveReport {
     try {
         Set-Content -LiteralPath $Out -Value $script:report -Encoding ASCII -ErrorAction Stop
@@ -95,6 +107,25 @@ function SaveReport {
 Say ''
 Say 'Everything below is also being saved to:'
 Say "  $Out"
+Say ''
+
+# WHY THIS BLOCK EXISTS. A report from a workstation was once read next to the
+# summary from the build machine, and the two contradicted each other flatly:
+# the table said seven hosts refused while the summary called all twelve
+# reachable. Neither half was wrong. They were different runs, and nothing in
+# the file said which machine either came from, so there was no way to notice.
+# An hour went into looking for a bug in this script that was never there.
+Say '---- WHERE THIS REPORT CAME FROM ----'
+Say "  Computer   : $env:COMPUTERNAME"
+Say "  User       : $env:USERNAME"
+Say "  When       : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss K')"
+Say "  Windows    : $([Environment]::OSVersion.Version)"
+Say "  PowerShell : $($PSVersionTable.PSVersion) on .NET $([Environment]::Version)"
+Say "  Script     : $(ScriptFingerprint)"
+Say ''
+Say '  That .NET version is not a detail. This script runs on .NET Framework;'
+Say '  the launcher runs on .NET 10, and they do not handle proxies alike.'
+Say '  See the PROXY section below.'
 Say ''
 
 $targets = @(
@@ -156,7 +187,7 @@ function Short-Issuer($issuer) {
     if (-not $cn) { $cn = ($issuer -split ',' | Where-Object { $_.Trim() -like 'O=*' } | Select-Object -First 1) }
     if (-not $cn) { return $issuer }
     $t = $cn.Trim() -replace '^(CN|O)=', ''
-    if ($t.Length -gt 28) { $t = $t.Substring(0, 28) + '...' }
+    if ($t.Length -gt 18) { $t = $t.Substring(0, 18) + '...' }
     return $t
 }
 
@@ -241,13 +272,221 @@ function Show($group, $title) {
     if ($rows.Count -eq 0) { return }
     Say ''
     Say "---- $title ----"
-    Say (($rows | Format-Table Host, What, Dns, Tls, Issuer, Http -AutoSize | Out-String).TrimEnd())
+    # Reached is printed even though Tls implies it, because every verdict below
+    # is computed from THIS field and nothing else. When a summary and a table
+    # appear to disagree, the first question is whether they are even the same
+    # data - and now that is answerable by looking.
+    # 'OK' rather than 'Reached', and an explicit Out-String width: at the
+    # default console width Format-Table ran out of room and rendered the
+    # header as a vertical column of single letters.
+    Say (($rows | Format-Table Host, What, Dns, Tls, Issuer, Http,
+        @{ n='OK'; e = { if ($_.Reached) { 'yes' } else { 'NO' } } } -AutoSize |
+        Out-String -Width 160).TrimEnd())
 }
 
 Show 'control'   'CONTROLS (these should pass)'
 Show 'minecraft' 'WHAT A MINECRAFT INSTALL NEEDS'
 Show 'fabric'    'WHAT UPDATING THE FABRIC LOADER NEEDS'
 Show 'hosting'   'WHERE WE COULD HOST A PAYLOAD'
+
+# ===========================================================================
+# PROXY.
+#
+# This section exists because of one specific contradiction in a real report:
+# the Mojang rows came back TLS 'refused' on a direct socket and HTTP '200' at
+# the same time. That is not noise, and it is not a flaky network. A direct
+# connection being refused while an HTTP request to the SAME host and port
+# succeeds means that request did not go direct - it went through a proxy.
+#
+# Which matters enormously, because the two stacks are not the same one:
+#
+#   this script    PowerShell 5.1, which is .NET FRAMEWORK. HttpWebRequest
+#                  picks up the WinINET/IE proxy settings by itself.
+#   the launcher   .NET 10, and Core\Downloader.cs builds a bare HttpClient
+#                  with no proxy and no proxy credentials.
+#
+# So "the probe reached Mojang" does NOT establish that the launcher can, and
+# on these machines the Setup tab cannot download versions while this script
+# reports 200. The three fetches below are the whole point of the section:
+# same URL, same machine, same moment, asked three different ways.
+# ===========================================================================
+
+Say ''
+Say '---- PROXY: CONFIGURATION ----'
+
+function RegVal($path, $name) {
+    try {
+        $v = Get-ItemProperty -LiteralPath $path -Name $name -ErrorAction Stop
+        $t = [string]$v.$name
+        if ([string]::IsNullOrWhiteSpace($t)) { return '(empty)' }
+        return $t
+    } catch { return '(not set)' }
+}
+
+$ieKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+Say "  ProxyEnable   : $(RegVal $ieKey 'ProxyEnable')"
+Say "  ProxyServer   : $(RegVal $ieKey 'ProxyServer')"
+Say "  ProxyOverride : $(RegVal $ieKey 'ProxyOverride')"
+Say "  AutoConfigURL : $(RegVal $ieKey 'AutoConfigURL')   <- a PAC file, if set"
+
+# WinHTTP keeps its own machine-wide proxy, separate from the per-user WinINET
+# settings above. Some stacks read one and some the other, which is exactly the
+# kind of difference that makes one program work and another fail.
+try {
+    $wh = (netsh winhttp show proxy | Out-String).Trim()
+    if (-not $wh) { $wh = '(no output)' }
+} catch { $wh = "(could not read - $($_.Exception.Message))" }
+Say ''
+Say '  netsh winhttp show proxy:'
+foreach ($line in ($wh -split "`r?`n")) { Say "    $line" }
+
+# WPAD autodiscovery: if this name resolves, a proxy can be imposed without any
+# of the registry values above being set at all.
+try {
+    $wp = @([Net.Dns]::GetHostAddresses('wpad') |
+            Where-Object { $_.AddressFamily -eq 'InterNetwork' } |
+            ForEach-Object { $_.IPAddressToString })
+    $wpad = if ($wp.Count -gt 0) { ($wp -join ', ') + '  <- WPAD is live' } else { 'no A record' }
+} catch { $wpad = 'does not resolve (good - no WPAD)' }
+Say ''
+Say "  wpad          : $wpad"
+
+# What .NET Framework decides to do for a given URL, which is what the probe
+# rows above actually used.
+function ProxyFor($url) {
+    try {
+        $sys = [Net.WebRequest]::GetSystemWebProxy()
+        $u   = [Uri]$url
+        $pr  = $sys.GetProxy($u)
+        if ($null -eq $pr)                  { return 'direct' }
+        if ($pr.Authority -eq $u.Authority) { return 'direct' }
+        return $pr.Authority
+    } catch { return "error: $($_.Exception.Message)" }
+}
+
+$lanProbe = 'http://192.168.1.10:25565/launcher/manifest'
+Say ''
+Say '  Resolved route per URL:'
+Say "    mojang.com            -> $(ProxyFor 'https://launchermeta.mojang.com/')"
+Say "    a LAN host (192.168.) -> $(ProxyFor $lanProbe)"
+
+# ---- the three-way fetch --------------------------------------------------
+# Reuses URLs from the target list above, so these are the same requests that
+# produced the Http column rather than new ones invented here.
+$proxyTargets = @($targets | Where-Object { $_.Group -eq 'minecraft' -and $_.Url } |
+                  Select-Object -First 2)
+
+function TryFetch($mode, $hostName, $url) {
+    $row = [ordered]@{ Host = $hostName; How = $mode; Via = '-'; Result = '-'; Ok = $false }
+    try {
+        $req = [Net.HttpWebRequest]::Create($url)
+        $req.Timeout   = 6000
+        $req.UserAgent = 'MinecraftPortableLauncher connectivity check'
+        $req.AddRange(0, 1023)
+
+        switch ($mode) {
+            'direct' {
+                # No proxy at all - the closest this script can get to what a
+                # bare HttpClient does.
+                $req.Proxy = $null
+                $row.Via = 'no proxy'
+            }
+            'proxy' {
+                $req.Proxy = [Net.WebRequest]::GetSystemWebProxy()
+                $row.Via = ProxyFor $url
+            }
+            'proxy+creds' {
+                $pr = [Net.WebRequest]::GetSystemWebProxy()
+                $pr.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials
+                $req.Proxy = $pr
+                $row.Via = ProxyFor $url
+            }
+        }
+
+        $resp = $req.GetResponse()
+        $row.Result = [string][int]$resp.StatusCode
+        $row.Ok = $true
+        $resp.Close()
+    } catch [Net.WebException] {
+        $r = $_.Exception.Response
+        if ($r) {
+            $code = [int]$r.StatusCode
+            $row.Result = "HTTP $code"
+            # A 407 is the proxy demanding credentials, and is the single most
+            # actionable result this whole section can produce.
+            if ($code -eq 407) { $row.Result = '407 proxy auth' }
+        } else {
+            $row.Result = $_.Exception.Status.ToString()
+        }
+    } catch {
+        $row.Result = 'error'
+    }
+    return [pscustomobject]$row
+}
+
+Say ''
+Say '---- PROXY: THE SAME REQUEST, ASKED THREE WAYS ----'
+$pfRows = @()
+foreach ($t in $proxyTargets) {
+    foreach ($mode in @('direct', 'proxy', 'proxy+creds')) {
+        $pfRows += TryFetch $mode $t.Host $t.Url
+    }
+}
+Say (($pfRows | Format-Table Host, How, Via, Result -AutoSize | Out-String).TrimEnd())
+
+$directOk = @($pfRows | Where-Object { $_.How -eq 'direct'      -and $_.Ok }).Count
+$proxyOk  = @($pfRows | Where-Object { $_.How -eq 'proxy'       -and $_.Ok }).Count
+$credsOk  = @($pfRows | Where-Object { $_.How -eq 'proxy+creds' -and $_.Ok }).Count
+$auth407  = @($pfRows | Where-Object { $_.Result -eq '407 proxy auth' }).Count
+
+Say ''
+Say ' PROXY VERDICT'
+if ($directOk -eq 0 -and ($proxyOk -gt 0 -or $credsOk -gt 0)) {
+    Say '   FOUND IT. Mojang is reachable ONLY through the proxy, and a direct'
+    Say '   connection fails. That is exactly the launcher''s situation: its'
+    Say '   HttpClient is built with no proxy, so it goes direct and fails,'
+    Say '   while this script succeeded by using the system proxy.'
+    Say ''
+    Say '   The fix is in the launcher, not the network: one shared HTTP'
+    Say '   factory in Core\Downloader.cs that uses the system proxy.'
+    if ($credsOk -gt 0 -and $proxyOk -eq 0) {
+        Say '   It also needs DEFAULT CREDENTIALS - the proxy only answered when'
+        Say '   the logged-on user was presented to it.'
+    }
+}
+elseif ($directOk -gt 0 -and $proxyOk -gt 0) {
+    Say '   Not the proxy. Mojang answers both directly and through a proxy, so'
+    Say '   whatever stops the Setup tab is something else. Read'
+    Say '   launcher_errors.txt beside the launcher before theorising further -'
+    Say '   a binding error behind an invisible MessageBox looks identical to a'
+    Say '   network failure.'
+}
+elseif ($directOk -eq 0 -and $proxyOk -eq 0 -and $credsOk -eq 0) {
+    Say '   Mojang is unreachable however it is asked. No launcher change will'
+    Say '   fix that, so versions and Java runtimes have to come from the HOST'
+    Say '   over the LAN: it downloads them once and serves them, which no'
+    Say '   filter on this machine applies to.'
+}
+else {
+    Say '   Mixed. Read the table above rather than trusting a one-line summary'
+    Say '   of it - that is what produced a contradictory report once already.'
+}
+
+if ($auth407 -gt 0) {
+    Say ''
+    Say '   NOTE: a 407 appeared. This proxy wants authentication, which a bare'
+    Say '   HttpClient will never supply on its own.'
+}
+
+$lanVia = ProxyFor $lanProbe
+if ($lanVia -ne 'direct' -and $lanVia -notlike 'error*') {
+    Say ''
+    Say "   WARNING: LAN traffic resolves through $lanVia rather than going"
+    Say '   direct. So a proxy must NOT be applied blindly in the launcher -'
+    Say '   check-ins, self-update, play blocks and the skin server all talk to'
+    Say '   the host on the LAN, and routing those through a proxy would break'
+    Say '   every one of them. Any fix has to bypass local addresses.'
+}
 
 Say ''
 Say '================================================================'
@@ -322,9 +561,18 @@ if ($mcRows.Count -gt 0) {
     $blocked   = @($needed | Where-Object { -not $_.Reached })
 
     if ($blocked.Count -eq 0) {
-        Say ' MINECRAFT: everything an install needs is reachable from here.'
-        Say '   So a download failure is not this machine being blocked - look at'
-        Say '   whether java.exe itself is filtered (Diagnose-MinecraftNet.ps1).'
+        Say ' MINECRAFT: every host an install needs answered THIS script.'
+        Say '   Read that narrowly. It does not mean the launcher can reach them,'
+        Say '   and on these machines the Setup tab cannot download versions while'
+        Say '   this section says everything is fine. Two different programs:'
+        Say ''
+        Say '     the Setup tab   the launcher itself, .NET 10, Core\Downloader.cs'
+        Say '     the game        java.exe, a separate process with its own rules'
+        Say ''
+        Say '   So check in this order:'
+        Say '     1. the PROXY section above - different stacks, different proxies'
+        Say '     2. launcher_errors.txt beside the launcher'
+        Say '     3. whether java.exe is filtered (Diagnose-MinecraftNet.ps1)'
     }
     else {
         Say " MINECRAFT blocked: $(($blocked | ForEach-Object { $_.Host }) -join ', ')"
