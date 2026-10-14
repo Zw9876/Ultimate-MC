@@ -1058,12 +1058,32 @@ namespace MinecraftLauncher.UI
         /// written by the skin server when a client checks in, and re-reading it is how
         /// this panel and the server stay in agreement rather than drifting apart.
         /// </remarks>
+        /// <summary>
+        /// When this launcher opened, which is what "tonight" means on the FLEET panel.
+        /// </summary>
+        /// <remarks>
+        /// The roster accumulates, and a machine last seen five days ago on an old build
+        /// was still counted when deciding whether a pause could reach everyone — so the
+        /// warning was answering a question about last week. Every count on that panel is
+        /// now scoped to machines seen since this moment.
+        ///
+        /// The rows themselves still show everything, with how long ago each was seen.
+        /// Knowing a machine exists at all is useful; letting it vote on tonight is not.
+        /// </remarks>
+        private readonly DateTime _launcherOpenedUtc = DateTime.UtcNow;
+
         private void RefreshFleet()
         {
             if (FleetList is null) return;
 
             var listing = FleetRoster.Load();
             var machines = FleetRoster.Sorted(listing);
+
+            // Scoped, not wiped. A client checks in only when its launcher opens or a
+            // game starts, and this launcher restarts itself on every mandatory update
+            // — so clearing the file part-way through an evening would drop everybody
+            // already playing and under-report the fleet instead of over-reporting it.
+            var tonight = FleetRoster.Since(listing, _launcherOpenedUtc);
 
             // Expired blocks are dropped here as well as when a client asks, so the
             // list a person reads never shows a block that has already run out.
@@ -1091,7 +1111,7 @@ namespace MinecraftLauncher.UI
             RefreshLoaderPolicy();
 
             int off = machines.Count(m => m.BlockText.StartsWith("OFF"));
-            FleetSummary.Text = FleetRoster.Summarise(listing, LauncherPackage.CurrentVersion) +
+            FleetSummary.Text = FleetRoster.Summarise(tonight, LauncherPackage.CurrentVersion) +
                                 (off > 0 ? $"  Playing is off on {off} of them." : "") +
                                 (pause is null
                                     ? ""
@@ -1105,9 +1125,22 @@ namespace MinecraftLauncher.UI
                 : "Nothing is being served right now — start the skin server (or a server) " +
                   "and machines will check in as people open their launchers and press PLAY.";
 
+            int older = listing.Machines.Count - tonight.Machines.Count;
+
+            // The distinction the counts depend on, so nobody has to infer it: the
+            // summary and the warnings are about tonight, the rows are the whole record.
+            string scope = older > 0
+                ? $"Counted above: the {tonight.Machines.Count} machine" +
+                  $"{(tonight.Machines.Count == 1 ? "" : "s")} seen since this launcher " +
+                  $"opened. {older} more {(older == 1 ? "was" : "were")} seen on earlier " +
+                  "days and still listed below, but they do not count towards whether " +
+                  "the fleet is caught up — they may not even be switched on."
+                : "Counted above: everything seen since this launcher opened.";
+
             FleetNote.Text =
-                $"Each launcher tells this host its computer name, the build it is running and " +
-                $"the name it last played under. Kept in {FleetRoster.FilePath}. {serving}";
+                $"{scope} Each launcher tells this host its computer name, the build it is " +
+                $"running and the name it last played under. Kept in {FleetRoster.FilePath}. " +
+                $"{serving}";
 
             // Appended AFTER FleetNote is assigned above, not before: prepending to it
             // first put the warning somewhere that the next line overwrote, which is
@@ -1116,9 +1149,9 @@ namespace MinecraftLauncher.UI
             // A restriction that silently reaches nobody is worse than none, because it
             // is trusted — which is exactly how a pause came to look broken.
             string? cannot = pause is not null
-                ? PlayBlocks.CanObey(listing, PlayBlocks.PauseFloor).Warn("a pause")
+                ? PlayBlocks.CanObey(tonight, PlayBlocks.PauseFloor).Warn("a pause")
                 : off > 0
-                    ? PlayBlocks.CanObey(listing, PlayBlocks.BlockFloor).Warn("being blocked")
+                    ? PlayBlocks.CanObey(tonight, PlayBlocks.BlockFloor).Warn("being blocked")
                     : null;
 
             if (cannot is not null) FleetNote.Text = cannot + "  " + FleetNote.Text;
@@ -1450,6 +1483,42 @@ namespace MinecraftLauncher.UI
             }
 
             FleetStatus.Text = string.Join(" ", said);
+            RefreshFleet();
+        }
+
+        /// <summary>
+        /// Forgets every machine, so the list starts from nothing.
+        /// </summary>
+        /// <remarks>
+        /// Rarely needed, because the counts are already scoped to this session — but
+        /// it is the honest answer when the record itself is junk: machines that have
+        /// been renamed, or rebuilt, or that no longer exist. They reappear by
+        /// themselves as people use them.
+        /// </remarks>
+        private void FleetForgetAll_Click(object sender, RoutedEventArgs e)
+        {
+            var listing = FleetRoster.Load();
+
+            if (listing.Machines.Count == 0)
+            {
+                FleetStatus.Text = "The list is already empty.";
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                $"Forget all {listing.Machines.Count} machines?\n\n" +
+                "They come back on the list by themselves as people open their launchers, " +
+                "so this only loses the record of machines that are not around any more.\n\n" +
+                "Nothing is blocked, paused or unpaused by this.",
+                "Forget all", MessageBoxButton.YesNo, MessageBoxImage.Question,
+                MessageBoxResult.No);
+
+            if (answer != MessageBoxResult.Yes) return;
+
+            FleetStatus.Text = FleetRoster.ForgetAll()
+                ? "Forgot every machine. They reappear as people use them."
+                : $"Could not write {FleetRoster.FilePath}.";
+
             RefreshFleet();
         }
 

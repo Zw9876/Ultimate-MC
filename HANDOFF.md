@@ -386,6 +386,22 @@ including where WebView2 is loaded from — depends on it.
     a version is not either — unknown is not the same as old. A machine that never
     checks in is simply absent, not flagged: it may be switched off, and a list that
     cried wolf about every powered-down computer would be ignored within a week.
+  - **Every count is scoped to machines seen since this launcher opened.** Added
+    2026-10-13, because the roster accumulates: a machine last seen five days ago on
+    an old build was still voting on whether the fleet was caught up, and on whether
+    a pause could reach everyone. The warning was answering a question about last
+    week. The rows still show the whole record with how long ago each was seen —
+    knowing a machine exists is useful — and the panel states which of the two it is
+    counting, naming how many are excluded.
+
+    **Scoped rather than wiped, and the difference matters.** Clearing `fleet.json`
+    on startup is the obvious move. A client checks in at exactly two moments: when
+    its launcher opens, and when a game starts. Never again. And this launcher
+    restarts itself on every mandatory update — so a wipe part-way through an evening
+    would drop everybody who was already playing and report the fleet as *smaller*
+    than it is. That is the same wrong answer in the other direction, and harder to
+    notice. `FleetRoster.Since` filters; `Forget all` on the FLEET panel is there for
+    a record that is genuinely junk rather than merely stale.
 
 - **Turning playing off for one machine** (Admin tab -> FLEET) — added 2026-10-12,
   because a Minecraft ban is by username and anybody can pick another one, which was
@@ -1762,7 +1778,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **801 offline checks in about 8 seconds**, and around 890 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
+`MinecraftLauncher.Tests/` — **822 offline checks in about 6 seconds**, and around 910 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
 
 ```powershell
 tools\run-tests.ps1                 # everything

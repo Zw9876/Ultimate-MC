@@ -94,6 +94,20 @@ if (Test-Path $blocksPath) { Remove-Item $blocksPath -Force }
 $hadPolicy = Test-Path $policyPath
 if ($hadPolicy) { Move-Item $policyPath "$policyPath.verify-backup" -Force }
 
+# A machine last seen five days ago, on a build far below both floors. Written
+# before the launcher opens so it is genuinely older than this session -- the
+# endpoint stamps its own timestamp, so it cannot be planted through a check-in.
+$ancient = (Get-Date).ToUniversalTime().AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ')
+@"
+{
+  "machines": [
+    { "machine": "GONE-LAST-WEEK", "username": "Nobody", "launcher": "1.2.265.376",
+      "seen": "$ancient" }
+  ]
+}
+"@ | Set-Content $rosterPath -Encoding ASCII
+Write-Output "  pre-seeded a machine last seen 5 days ago on 1.2.265.376"
+
 $p = Start-Process $exe -PassThru
 Start-Sleep -Seconds 16
 
@@ -180,7 +194,14 @@ Check 'the roster is written beside the launcher' (Test-Path $rosterPath) $roste
 
 if (Test-Path $rosterPath) {
     $roster = Get-Content $rosterPath -Raw | ConvertFrom-Json
-    Check 'both machines are in it' ($roster.machines.Count -eq 2) $roster.machines.Count
+    # Three, not two: the two that checked in plus the one pre-seeded from last
+    # week. Asserted by name rather than by count, so pre-seeding more later
+    # cannot quietly turn this into a check of nothing.
+    $names = @($roster.machines | ForEach-Object { $_.machine })
+    Check 'both machines that checked in are in it' `
+          (($names -contains 'TEST-BENCH-01') -and ($names -contains 'TEST-BENCH-02')) ($names -join ', ')
+    Check 'and the pre-seeded old one is kept rather than discarded' `
+          ($names -contains 'GONE-LAST-WEEK') ($names -join ', ')
 
     $one = $roster.machines | Where-Object { $_.machine -eq 'TEST-BENCH-01' }
     Check 'the username came through' ($one.username -eq 'Steve') $one.username
@@ -398,6 +419,8 @@ if ($loaderBtn) {
     }
 }
 
+Check 'there is a way to empty the list entirely' ($null -ne (ById $w 'FleetForgetAllButton')) 'no forget-all button'
+
 Check 'the fleet tab offers a way to turn playing off' ($null -ne (ById $w 'FleetBlockButton')) 'no block button'
 Check 'and a way to turn it back on' ($null -ne (ById $w 'FleetUnblockButton')) 'no unblock button'
 
@@ -415,6 +438,19 @@ Write-Output ("  fleet note: " + $fleetNote.Substring(0, [Math]::Min(150, $fleet
 Check 'the panel warns that machines are too old to obey a block' `
       ($fleetNote -match 'too old to obey') $fleetNote
 Check 'and names one of them' ($fleetNote -match 'TEST-BENCH-0') $fleetNote
+
+# The counts must be about tonight, while the row for last week is still listed.
+Check 'the old machine is still listed' ($null -ne (ByName $w 'GONE-LAST-WEEK')) 'row missing'
+
+Check 'but it is not counted in the summary' ($summary -match '2 machines') $summary
+Check 'and the panel says so' ($fleetNote -match 'seen on earlier days|earlier day') $fleetNote
+Check 'naming how many are excluded' ($fleetNote -match '1 more was seen') $fleetNote
+
+# The point of all of it: an ancient machine must not drag the obedience warning
+# with it. The two that checked in tonight are themselves below the block floor,
+# so the warning should name THEM and not the one from last week.
+Check 'the too-old warning is about tonight, not last week' `
+      (-not ($fleetNote -match 'GONE-LAST-WEEK')) $fleetNote
 
 $fleetAgain = (ById $w 'FleetSummary').Current.Name
 Write-Output "  fleet summary: $fleetAgain"

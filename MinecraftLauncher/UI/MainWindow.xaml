@@ -1080,6 +1080,10 @@
                                         Width="90" Height="32" Margin="0,0,8,0"
                                         Click="FleetForget_Click" Style="{StaticResource PlainButton}"
                                         ToolTip="Removes the selected row. It comes back if that machine checks in again."/>
+                                <Button x:Name="FleetForgetAllButton" Content="Forget all"
+                                        Width="100" Height="32" Margin="0,0,8,0"
+                                        Click="FleetForgetAll_Click" Style="{StaticResource PlainButton}"
+                                        ToolTip="Empties the list. Only worth it when the record itself is junk - the counts above already ignore machines not seen since this launcher opened."/>
                                 <TextBlock x:Name="FleetStatus" VerticalAlignment="Center" Margin="8,0,0,0"
                                            Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                             </StackPanel>

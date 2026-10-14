@@ -11,7 +11,7 @@ The C# launcher (`MinecraftLauncher/`, .NET 10 WPF) is **complete and shipping**
 The whole PowerShell feature set is ported plus a good deal more;
 `MinecraftLauncher-Standalone.ps1` is now only a behavioural reference.
 
-**Current build: 1.2.285.217** (2026-10-12), at the repo root and in the rollout zip
+**Current build: 1.2.286.154** (2026-10-13), at the repo root and in the rollout zip
 (56.3 MB, launcher verified byte-for-byte inside it). Build both zips with
 `tools\Build-RolloutZip.ps1` rather than by hand — it refuses to write an update zip
 containing anything host-only. Updates are mandatory and self-installing, so in
@@ -121,8 +121,8 @@ beside the exe and finds nothing.
   compiled fine and failed at run time — a wrong Java version, a silently
   misdirected installer, a profile the scanner could not see. Launch it, drive the
   UI, read the server output.
-- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 801 offline checks in about 8
-  seconds, exit code 0 when clean; around 890 with the network suite, which moves
+- **Run `tools\run-tests.ps1` before and after changing `Core/`.** 822 offline checks in about 6
+  seconds, exit code 0 when clean; around 910 with the network suite, which moves
   with the live Modrinth API. `-Offline` skips the network suite. Piped
   anywhere it prints only failures and the count — `-ShowAll` for a line per check.
   Add to `MinecraftLauncher.Tests/Suites/` as work lands — and write the checks against

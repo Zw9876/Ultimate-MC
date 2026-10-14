@@ -202,6 +202,38 @@ namespace MinecraftLauncher.Core
             listing.Machines.OrderByDescending(m => m.Seen).ToList();
 
         /// <summary>
+        /// Only the machines seen since a given moment — in practice, since this
+        /// launcher opened.
+        /// </summary>
+        /// <remarks>
+        /// <para>This exists because the roster accumulates. A machine last seen five
+        /// days ago on an old build still counted toward "2 of 5 are too old to obey a
+        /// pause", which made the one warning the host relies on untrustworthy: it was
+        /// answering a question about last week.</para>
+        ///
+        /// <para><b>Filtered rather than wiped, deliberately.</b> Clearing the file on
+        /// startup is the obvious move and it has a sharp edge: a client checks in at
+        /// exactly two moments — when its launcher opens, and when a game starts — and
+        /// never again. The host's own launcher restarts itself on every mandatory
+        /// update, so a wipe part-way through an evening would drop everybody who was
+        /// already playing and make the fleet look <i>smaller</i> than it is, which is
+        /// the same class of wrong answer in the other direction. Keeping the records
+        /// and scoping the question costs nothing and cannot do that.</para>
+        /// </remarks>
+        public static Listing Since(Listing listing, DateTime sinceUtc) =>
+            new()
+            {
+                Machines = listing.Machines.Where(m => m.Seen >= sinceUtc).ToList()
+            };
+
+        /// <summary>Forgets every machine. The hard reset, for when the list is junk.</summary>
+        public static bool ForgetAll()
+        {
+            var empty = new Listing();
+            return Save(empty);
+        }
+
+        /// <summary>
         /// How many machines are not yet on the host's build.
         /// </summary>
         /// <remarks>
@@ -221,8 +253,9 @@ namespace MinecraftLauncher.Core
         {
             int total = listing.Machines.Count;
             if (total == 0)
-                return "No machines have checked in yet. They report themselves when " +
-                       "somebody opens the launcher or presses PLAY while this host is running.";
+                return "Nothing has checked in since this launcher opened. Machines report " +
+                       "themselves when somebody opens their launcher or presses PLAY, so " +
+                       "give it until people start using them.";
 
             int behind  = Behind(listing, hostVersion);
             int unknown = listing.Machines.Count(m => m.Version == new Version(0, 0, 0, 0));

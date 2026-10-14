@@ -32,6 +32,7 @@ namespace MinecraftLauncher.Tests
                 Merging();
                 Counting();
                 Storing();
+                Scoping();
                 Inbox();
                 SendingOnce(sandbox);
             }
@@ -188,6 +189,83 @@ namespace MinecraftLauncher.Tests
             Expect("in hours", FleetRoster.Describe(TimeSpan.FromHours(5)), "5 h ago");
             Expect("yesterday", FleetRoster.Describe(TimeSpan.FromHours(30)), "yesterday");
             Expect("and in days", FleetRoster.Describe(TimeSpan.FromDays(9)), "9 days ago");
+        }
+
+        private static void Scoping()
+        {
+            Section("only what has been seen tonight");
+
+            // The problem: the roster accumulates, and a machine last seen five days
+            // ago on an old build still counted when deciding whether a pause could
+            // reach everyone. The warning was answering a question about last week.
+            var listing = new FleetRoster.Listing();
+            var opened = new DateTime(2026, 10, 13, 18, 0, 0, DateTimeKind.Utc);
+
+            FleetRoster.Merge(listing, Report("TONIGHT-1", "A", "1.2.285.1382"), null, opened.AddMinutes(5));
+            FleetRoster.Merge(listing, Report("TONIGHT-2", "B", "1.2.285.1382"), null, opened.AddMinutes(40));
+            FleetRoster.Merge(listing, Report("LAST-WEEK", "C", "1.2.265.376"),  null, opened.AddDays(-5));
+            FleetRoster.Merge(listing, Report("YESTERDAY", "D", "1.2.280.291"),  null, opened.AddDays(-1));
+
+            var tonight = FleetRoster.Since(listing, opened);
+
+            Expect("the whole record still has four", listing.Machines.Count, 4);
+            Expect("but only two were seen tonight", tonight.Machines.Count, 2);
+            Check("and they are the right two",
+                  tonight.Machines.All(m => m.Name.StartsWith("TONIGHT")),
+                  string.Join(", ", tonight.Machines.Select(m => m.Name)));
+
+            // The determination this exists for. Across the whole record two machines
+            // are too old to obey a pause; among tonight's, none are.
+            var all = PlayBlocks.CanObey(listing, PlayBlocks.PauseFloor);
+            var now = PlayBlocks.CanObey(tonight, PlayBlocks.PauseFloor);
+
+            Expect("the whole record says two cannot obey a pause", all.TooOld, 2);
+            Expect("tonight says none cannot", now.TooOld, 0);
+            Check("so tonight reaches everyone", now.Everyone);
+            Check("and says nothing, instead of warning about last week",
+                  now.Warn("a pause") is null, now.Warn("a pause"));
+            Check("whereas the unscoped answer would have warned",
+                  all.Warn("a pause") is not null);
+
+            // Same for "is the fleet caught up".
+            var host = new Version(1, 2, 285, 1382);
+            Check("the scoped summary counts two machines",
+                  FleetRoster.Summarise(tonight, host).Contains("2 machines"),
+                  FleetRoster.Summarise(tonight, host));
+            Check("and reports them all current",
+                  FleetRoster.Summarise(tonight, host).Contains("all on"),
+                  FleetRoster.Summarise(tonight, host));
+            Check("while the whole record reports machines behind",
+                  FleetRoster.Summarise(listing, host).Contains("behind"),
+                  FleetRoster.Summarise(listing, host));
+
+            // Nothing seen tonight is its own answer, and must not read as "all good".
+            var quiet = FleetRoster.Since(listing, opened.AddDays(1));
+            Expect("a quiet session has nobody", quiet.Machines.Count, 0);
+            string said = FleetRoster.Summarise(quiet, host);
+            Note(said);
+            Check("it says nothing has checked in since the launcher opened",
+                  said.Contains("since this launcher opened"), said);
+            Check("and does not claim everyone is up to date",
+                  !said.Contains("all on"), said);
+
+            // A machine seen exactly at the boundary counts as tonight: the launcher
+            // checks itself in moments after opening, and excluding it would drop the
+            // most reliable row on the panel.
+            var edge = new FleetRoster.Listing();
+            FleetRoster.Merge(edge, Report("EXACT", "E", "1.2.285.1382"), null, opened);
+            Expect("a machine seen at the moment of opening counts",
+                   FleetRoster.Since(edge, opened).Machines.Count, 1);
+
+            // Scoping must not mutate the record it is reading.
+            Expect("filtering leaves the original alone", listing.Machines.Count, 4);
+
+            // The hard reset, for a record that is junk rather than merely stale.
+            Check("every machine can be forgotten at once", FleetRoster.Save(listing));
+            Expect("saved four", FleetRoster.Load().Machines.Count, 4);
+            Check("forget-all works", FleetRoster.ForgetAll());
+            Expect("and the list is empty", FleetRoster.Load().Machines.Count, 0);
+            Check("doing it again is harmless", FleetRoster.ForgetAll());
         }
 
         private static void Storing()
