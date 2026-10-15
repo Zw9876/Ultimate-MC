@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -60,7 +60,9 @@ namespace MinecraftLauncher.Core
 
             if (string.IsNullOrWhiteSpace(host))
             {
-                try { host = (await Task.Run(SkinDiscovery.FindRemote, ct))?.Address; }
+                    // Required mods are the host's list, so ask the host - a peer
+                    // would answer with its own, or with none.
+                try { host = (await Task.Run(SkinDiscovery.FindAdmin, ct))?.Address; }
                 catch (Exception) { host = null; }
             }
 

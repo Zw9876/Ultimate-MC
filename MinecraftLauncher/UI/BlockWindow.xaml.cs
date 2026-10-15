@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -154,9 +154,9 @@ namespace MinecraftLauncher.UI
                 lines.Add("That is this computer, which is never blocked — the machine " +
                           "holding admin.flag is exempt, so this would have no effect.");
 
-            if (_resolved.Version > new Version(0, 0, 0, 0) && _resolved.Version < PlayBlocks.BlockFloor)
+            if (_resolved.Version > new Version(0, 0, 0, 0) && _resolved.Version < PlayBlocks.ControlFloor)
                 lines.Add($"Its launcher ({_resolved.LauncherText}) is older than " +
-                          $"{PlayBlocks.BlockFloor} and does not understand being blocked, so " +
+                          $"{PlayBlocks.ControlFloor} and may not act on being blocked, so " +
                           "it will carry on until it updates. A game already running keeps its " +
                           "old watcher even after that, until it is restarted.");
 

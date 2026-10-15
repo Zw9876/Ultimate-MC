@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -240,7 +240,11 @@ namespace MinecraftLauncher.Core
             if (File.Exists(aliJar))
             {
                 var cfg = AppConfig.Load();
-                string? addr = SkinDiscovery.Resolve(cfg);
+
+                // Skins belong with the Minecraft server being played, so this asks
+                // for the skin server hosting THIS version rather than taking the
+                // first responder. Several on one LAN is the intended arrangement.
+                string? addr = SkinDiscovery.ResolveForSkins(cfg, version, loaderType);
                 skinServer = addr;
                 if (addr != null)
                 {

@@ -1322,6 +1322,59 @@ WPF code-behind thin.
 ---
 ## 11. Notable gotchas learned the hard way (so they aren't rediscovered)
 
+### Every launcher was an authority on whether anyone could play
+
+Pausing everyone was switched on with the whole fleet confirmed up to date, and
+only some machines stopped. The pause was fine. Four things composed into it:
+
+1. **No endpoint is gated on `admin.flag`** — grep `SkinServer.cs` and
+   `SessionShutdown.cs` and there are no matches. Every launcher serves
+   `/launcher/blocks`, `/launcher/shutdown` and `/launcher/checkin`.
+2. A peer's `ShutdownAnnouncer` reads **its own** empty `play-blocks.json`, so it
+   answers "nothing happening" — truthfully, which is why nothing logged an error.
+3. `SkinDiscovery.Discover()` **broke on the first remote reply**, so a client
+   bound to whichever skin server answered the broadcast first.
+4. The reply was `MCSKINSERVER:{Port}` and nothing else, so **a client could not
+   tell whose server it had reached.** Identity was not in the protocol.
+
+And the sharpest edge: `GameWatcher.Spawn` was passed
+`launched.SkinServerAddress`. A running game polled the skin server it had bound
+to **for skins** to ask whether play had been turned off.
+
+Three lessons worth more than the fix:
+
+- **A truthful answer from the wrong machine is the hardest kind of bug.** Every
+  piece worked; nothing timed out, nothing threw, no log line appeared. The first
+  failure of this feature looked identical and had a different cause, which is
+  how an hour went into re-checking version floors that were already correct.
+- **Check-ins travelled the same path**, so the machines that ignored the pause
+  were also the ones missing or stale in the FLEET list — the fleet panel was
+  describing the machines that happened to pick the right host. A diagnostic
+  built on the same broken assumption as the feature confirms nothing.
+- **Several skin servers on one LAN is correct**, not a fault to prevent. One
+  starts whenever somebody hosts a Minecraft server, and players should get the
+  skins of the server they are on. The fix was to tell the two questions apart,
+  not to stop the second server existing:
+
+  | question | resolves to |
+  |---|---|
+  | whose skins? | `ResolveForSkins(config, version, loader)` — the server hosting that version |
+  | who says whether I may play? | `FindAdmin()` — `admin.flag` only, **null** rather than a peer |
+
+`FindAdmin` deliberately ignores `config.SkinServer`. That override points skins
+at a chosen machine; if it could also choose who decides whether play is allowed,
+anyone could escape a ban by editing one line of their own config.
+
+The protocol change had to be backward compatible in a specific way: deployed
+launchers match `^MCSKINSERVER:(\d+)$`, **anchored**, so appending fields to that
+line would have made every machine in the field see no skin server at all. So the
+legacy datagram is still sent unchanged and a second `MCSKINSERVER2:` one carries
+key=value fields beside it, which old clients fail to match and skip. The
+`discovery` suite stands a real server up on a socket and asserts a frozen copy
+of the deployed regex still matches — duplicated on purpose, so it fails if the
+two ever stop agreeing.
+
+
 ### A diagnostic report that mixed two machines, and the hour spent hunting a bug that was never there
 
 A `download-hosts-report.txt` was read in which the hosting **table** marked seven

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -77,6 +77,21 @@ namespace MinecraftLauncher.Core
         /// Lives here because every client already talks to this server for skins.
         /// </summary>
         public ShutdownAnnouncer Shutdown { get; } = new();
+
+        /// <summary>
+        /// Which Minecraft server this skin server belongs to, announced so clients
+        /// bind to the one for the game they are launching.
+        /// </summary>
+        /// <remarks>
+        /// Several skin servers on one LAN is the intended arrangement, not a fault:
+        /// each belongs to the Minecraft server running on its machine, and players
+        /// should get the skins of the server they are actually on. Without this a
+        /// client took whichever server answered the broadcast first.
+        /// </remarks>
+        public string? HostedVersion { get; set; }
+
+        /// <summary>The loader that version runs, where one is known.</summary>
+        public string? HostedLoader { get; set; }
 
         /// <summary>Raised from background threads — marshal before touching UI.</summary>
         public event Action<string>? Log;
@@ -957,10 +972,47 @@ namespace MinecraftLauncher.Core
         }
 
         // ── UDP discovery ────────────────────────────────────────────
+
+        /// <summary>
+        /// Both announcement forms, legacy first.
+        /// </summary>
+        /// <remarks>
+        /// The legacy line is still sent, and must be: every launcher already on the
+        /// fleet matches it with an anchored regex, so putting the new fields on that
+        /// line would make all of them find no skin server at all. They skip the
+        /// second datagram, having no pattern that matches it.
+        ///
+        /// Built per request rather than cached at startup, because what this server
+        /// hosts - and whether admin.flag is beside the launcher - can change while it
+        /// runs, and a cached reply would go on announcing the answer from startup.
+        /// </remarks>
+        private IEnumerable<byte[]> Announcements()
+        {
+            yield return Encoding.ASCII.GetBytes($"MCSKINSERVER:{Port}");
+
+            var sb = new StringBuilder("MCSKINSERVER2:");
+            sb.Append("port=").Append(Port);
+            sb.Append(";machine=").Append(Clean(Environment.MachineName));
+            sb.Append(";admin=").Append(RequiredMods.AdminEnabled ? "1" : "0");
+
+            if (!string.IsNullOrWhiteSpace(HostedVersion))
+                sb.Append(";mc=").Append(Clean(HostedVersion!));
+            if (!string.IsNullOrWhiteSpace(HostedLoader))
+                sb.Append(";loader=").Append(Clean(HostedLoader!));
+
+            yield return Encoding.ASCII.GetBytes(sb.ToString());
+        }
+
+        /// <summary>
+        /// Removes the two characters that mean something in an announcement, so a
+        /// machine or version name containing one cannot corrupt the fields after it.
+        /// </summary>
+        private static string Clean(string value) =>
+            value.Replace(';', '_').Replace('=', '_').Trim();
+
         private async Task DiscoveryLoopAsync(CancellationToken ct)
         {
             var buffer = new byte[256];
-            byte[] reply = Encoding.ASCII.GetBytes($"MCSKINSERVER:{Port}");
 
             while (!ct.IsCancellationRequested && _udp is not null)
             {
@@ -972,7 +1024,9 @@ namespace MinecraftLauncher.Core
                     string message = Encoding.ASCII.GetString(buffer, 0, result.ReceivedBytes);
                     if (message.Trim() == DiscoverProbe)
                     {
-                        await _udp.SendToAsync(reply, SocketFlags.None, result.RemoteEndPoint, ct);
+                        foreach (byte[] reply in Announcements())
+                            await _udp.SendToAsync(
+                                reply, SocketFlags.None, result.RemoteEndPoint, ct);
                         Log?.Invoke($"Discovery reply sent to {result.RemoteEndPoint}");
                     }
                 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -115,7 +115,10 @@ namespace MinecraftLauncher.Core
 
             string? host = config.SkinServer?.Trim();
             if (string.IsNullOrWhiteSpace(host))
-                host = (await Task.Run(SkinDiscovery.FindRemote, ct))?.Address;
+                // FindAdmin, not FindRemote. Updates come from the host, and this
+                // address is also what the startup check-in reuses, so a peer here
+                // took a machine out of the fleet list as well as off the update path.
+                host = (await Task.Run(SkinDiscovery.FindAdmin, ct))?.Address;
 
             if (string.IsNullOrWhiteSpace(host))
                 return new UpdateLookup { Outcome = UpdateOutcome.NoHostFound, LocalVersion = local };

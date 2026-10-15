@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net.Http;
@@ -185,7 +185,10 @@ namespace MinecraftLauncher.UI
                         // start one later in the evening, so keep looking — slowly.
                         if (DateTime.UtcNow >= nextDiscovery)
                         {
-                            _host = await Task.Run(() => SkinDiscovery.Resolve(AppConfig.Load()));
+                            // Admin host, for the same reason the launcher resolves
+                            // one: a peer's skin server would answer, and would say
+                            // nothing is happening.
+                            _host = await Task.Run(() => SkinDiscovery.FindAdmin()?.Address);
                             nextDiscovery = DateTime.UtcNow + RediscoverInterval;
                         }
                     }

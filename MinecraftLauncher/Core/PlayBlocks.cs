@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -56,6 +56,36 @@ namespace MinecraftLauncher.Core
 
         /// <inheritdoc cref="PauseFloor"/>
         public static readonly Version BlockFloor = new(1, 2, 285, 114);
+
+        /// <summary>
+        /// The build that first asked the ADMIN host whether play is allowed, rather
+        /// than whichever skin server answered a broadcast first.
+        /// </summary>
+        /// <remarks>
+        /// The second time a pause reached only part of the fleet, on 2026-10-14, every
+        /// machine was new enough to understand the <c>paused</c> field. They were
+        /// asking the wrong machine. Every launcher serves /launcher/blocks and
+        /// /launcher/shutdown, several machines run skin servers because one starts
+        /// whenever somebody hosts a Minecraft server, and discovery took the first
+        /// remote reply - so a client could be told, truthfully, by a peer with an
+        /// empty play-blocks.json, that nothing was happening.
+        ///
+        /// Below this build a machine understands a pause perfectly and may still ask
+        /// a peer about it, which is indistinguishable from not understanding one.
+        /// </remarks>
+        public static readonly Version RouteFloor = new(1, 2, 287, 135);
+
+        /// <summary>
+        /// The floor that actually decides whether a restriction can be relied upon.
+        /// </summary>
+        /// <remarks>
+        /// The latest of the three, computed rather than written down: understanding
+        /// what a pause is does no good while the question goes to the wrong machine,
+        /// so the newest requirement is the one that governs. Taking the maximum means
+        /// adding a floor later cannot leave this quietly reporting the old one.
+        /// </remarks>
+        public static Version ControlFloor =>
+            new[] { PauseFloor, BlockFloor, RouteFloor }.Max()!;
 
         /// <summary>How much of the fleet can act on something, and how much cannot.</summary>
         public sealed record Reach(int Total, int TooOld, int Unknown, List<string> Names)

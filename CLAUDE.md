@@ -44,13 +44,28 @@ Also section 5.
 
 Two have now met reality, and both taught something:
 
-- **Pausing everyone was used in earnest on 2026-10-13 and somebody kept
-  playing.** The host side was fine; the fleet predated the feature. A client
-  older than 1.2.285.145 does not know the `paused` field exists, and a game
-  already running keeps its old watcher even after that client updates. Measured
-  side by side afterwards (`Verify-Pause.ps1 -OldLauncher`), and the host is now
-  warned when machines cannot obey. **It will not reliably work until the fleet
-  has caught up** — the FLEET panel says when it has.
+- **Pausing everyone failed twice, for two different reasons, and the second
+  one was the real bug.**
+
+  *2026-10-13* — somebody kept playing because the fleet predated the feature: a
+  client older than 1.2.285.145 does not know the `paused` field exists.
+  Measured side by side (`Verify-Pause.ps1 -OldLauncher`).
+
+  *2026-10-14* — tried again with **every machine up to date**, and it still
+  reached only some of them. Nothing was wrong with the pause. Clients were
+  **asking the wrong machine**. No endpoint is gated on `admin.flag`, so every
+  launcher serves `/launcher/blocks` and `/launcher/shutdown`; a skin server
+  starts whenever anyone hosts a Minecraft server; and discovery took the *first
+  remote reply*. A peer answered "nothing happening" perfectly truthfully out of
+  its own empty `play-blocks.json`. Worse, `GameWatcher` was handed
+  `launched.SkinServerAddress` outright, so a running game polled the skin
+  server it had bound to for skins.
+
+  Fixed by splitting the two questions: skins resolve per Minecraft version
+  (`ResolveForSkins`), authority resolves to `admin.flag` only (`FindAdmin`,
+  which returns **nothing** rather than falling back to a peer). `PlayBlocks.
+  ControlFloor` is now the floor that governs, because understanding a pause is
+  useless while the question goes elsewhere — the FLEET panel warns from it.
 - **The Fabric loader policy is switched on here and really upgraded this host's
   server**, 0.19.3 to 0.19.5, proved by starting it: *"Loading Minecraft 26.1.2
   with Fabric Loader 0.19.5 … Done (1.288s)"*. Not yet proven on anyone else's

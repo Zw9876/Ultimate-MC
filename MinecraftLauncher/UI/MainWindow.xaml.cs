@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -435,17 +435,21 @@ namespace MinecraftLauncher.UI
         {
             if (_sessionHostResolved) return _sessionHost;
 
-            string? configured = _config.SkinServer?.Trim();
-            if (!string.IsNullOrWhiteSpace(configured))
-            {
-                _sessionHost = configured;
-            }
-            else
-            {
-                // Already known if this launcher adopted somebody else's skin server.
-                _sessionHost = _adoptedSkinServer
-                    ?? (await Task.Run(() => SkinDiscovery.FindRemote()?.Address));
-            }
+            // The ADMIN host specifically, not whichever skin server answered the
+            // broadcast first.
+            //
+            // Every launcher serves /launcher/blocks and /launcher/shutdown, and one
+            // that is not the admin host answers "nothing happening" perfectly
+            // truthfully, out of its own empty play-blocks.json. So a client that
+            // bound to a peer - which it did, because discovery took the first remote
+            // reply - was told it could play. That is why pausing everyone reached
+            // only part of the fleet on 2026-10-14 with the whole fleet up to date.
+            //
+            // config.SkinServer is deliberately NOT consulted here, and neither is an
+            // adopted skin server. Those point SKINS at a chosen machine. If either
+            // could also choose who decides whether play is allowed, then anybody
+            // could escape a ban by editing one line of their own config.
+            _sessionHost = await Task.Run(() => SkinDiscovery.FindAdmin()?.Address);
 
             _sessionHostResolved = true;
             return _sessionHost;
@@ -1148,10 +1152,13 @@ namespace MinecraftLauncher.UI
             //
             // A restriction that silently reaches nobody is worse than none, because it
             // is trusted — which is exactly how a pause came to look broken.
+            // ControlFloor, not PauseFloor or BlockFloor: a machine can understand
+            // both perfectly and still ask a peer rather than this host, which looks
+            // exactly the same from here - the restriction is simply ignored.
             string? cannot = pause is not null
-                ? PlayBlocks.CanObey(tonight, PlayBlocks.PauseFloor).Warn("a pause")
+                ? PlayBlocks.CanObey(tonight, PlayBlocks.ControlFloor).Warn("a pause")
                 : off > 0
-                    ? PlayBlocks.CanObey(tonight, PlayBlocks.BlockFloor).Warn("being blocked")
+                    ? PlayBlocks.CanObey(tonight, PlayBlocks.ControlFloor).Warn("being blocked")
                     : null;
 
             if (cannot is not null) FleetNote.Text = cannot + "  " + FleetNote.Text;
@@ -1340,7 +1347,7 @@ namespace MinecraftLauncher.UI
 
             // Who can actually act on this, asked before it is set rather than
             // discovered afterwards by somebody still playing.
-            var reach = PlayBlocks.CanObey(FleetRoster.Load(), PlayBlocks.PauseFloor);
+            var reach = PlayBlocks.CanObey(FleetRoster.Load(), PlayBlocks.ControlFloor);
 
             var dialog = new PauseWindow(serving, reach.Warn("a pause")) { Owner = this };
 
@@ -1889,7 +1896,11 @@ namespace MinecraftLauncher.UI
 
                 // Something has to stay behind to close this game when the host ends
                 // the session, because the launcher itself is about to close.
-                GameWatcher.Spawn(launched.Game.Id, launched.SkinServerAddress, version, loader);
+                // The ADMIN host, not launched.SkinServerAddress. Handing the watcher
+                // the skin server it bound to was the whole bug: on a LAN with more
+                // than one skin server it would sit politely asking a peer whether
+                // play had been turned off, and be told no.
+                GameWatcher.Spawn(launched.Game.Id, host, version, loader);
 
                 // The game is a separate process, so the launcher closes and gets
                 // out of the way — matching the PowerShell version.
@@ -2039,7 +2050,9 @@ namespace MinecraftLauncher.UI
                 }
                 else
                 {
-                    StartSkinServer(forHosting: true);
+                    // Already known here, so no prompt: this skin server exists
+                    // because a Minecraft server is starting, and it belongs to it.
+                    StartSkinServer(forHosting: true, version: version, loader: loaderType);
                     skinHost = "127.0.0.1";
                     skinPort = SkinServer.DefaultPort;
                     skinNote = $"Skin server started on {_skinServer?.HostIp}:{skinPort}.";
@@ -3417,7 +3430,8 @@ namespace MinecraftLauncher.UI
                         MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
-                StartSkinServer(forHosting: false);
+                if (PromptForHostedVersion() is not { } chosen) return;
+                StartSkinServer(forHosting: false, version: chosen);
             }
             finally { SkinServerToggle.IsEnabled = true; }
         }
@@ -3434,7 +3448,100 @@ namespace MinecraftLauncher.UI
             return remote;
         }
 
-        private void StartSkinServer(bool forHosting)
+        /// <summary>
+        /// Asks which Minecraft version this skin server is being started for, or null
+        /// if the person cancelled.
+        /// </summary>
+        /// <remarks>
+        /// A skin server belongs to a Minecraft server, so it has to say which one.
+        /// Clients pick the skin server for the version they are launching, and one
+        /// that announced no version is only ever a fallback.
+        ///
+        /// A ListBox rather than an editable ComboBox on purpose. ValuePattern.SetValue
+        /// does not update ComboBox.Text, which once made a dialog impossible to drive
+        /// from a test in either direction - so the selection is an item, which
+        /// SelectionItemPattern can actually set. Handoff section 11.
+        /// </remarks>
+        private static string? PromptForHostedVersion()
+        {
+            var versions = VersionScanner.HostableVersions();
+            if (versions.Count == 0)
+            {
+                MessageBox.Show(
+                    "No Minecraft versions are installed, so there is nothing for a " +
+                    "skin server to be for.\n\nInstall a version on the Client or " +
+                    "Server tab first.",
+                    "Nothing to host", MessageBoxButton.OK, MessageBoxImage.Information);
+                return null;
+            }
+
+            var dialog = new Window
+            {
+                Title = "Which version is this skin server for?",
+                Width = 420,
+                // SizeToContent with Auto rows, never a fixed Height: a fixed height
+                // plus a star row is what once squeezed a text box underneath a
+                // button and made it look absent. Handoff section 11.
+                SizeToContent = SizeToContent.Height,
+                MaxHeight = 560,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                ResizeMode = ResizeMode.NoResize,
+                Background = (System.Windows.Media.Brush)Application.Current.Resources["BgBrush"]
+            };
+
+            var panel = new StackPanel { Margin = new Thickness(16) };
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Players launching this version will use this machine's skins. " +
+                       "Pick the version of the Minecraft server running here.",
+                Foreground = (System.Windows.Media.Brush)Application.Current.Resources["TextBrush"],
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 10)
+            });
+
+            var list = new ListBox
+            {
+                Name = "HostedVersionList",
+                MaxHeight = 300,
+                Background = (System.Windows.Media.Brush)Application.Current.Resources["BgBrush"],
+                Foreground = (System.Windows.Media.Brush)Application.Current.Resources["TextBrush"]
+            };
+            foreach (string v in versions) list.Items.Add(v);
+            list.SelectedIndex = versions.Count - 1;      // newest, which is the usual answer
+            panel.Children.Add(list);
+
+            var buttons = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 14, 0, 0)
+            };
+
+            string? result = null;
+            var ok = new Button
+            {
+                Content = "Start", Width = 80, Height = 28, Margin = new Thickness(0, 0, 8, 0),
+                Style = (Style)Application.Current.Resources["PlainButton"], IsDefault = true
+            };
+            ok.Click += (_, _) => { result = list.SelectedItem as string; dialog.Close(); };
+
+            var cancel = new Button
+            {
+                Content = "Cancel", Width = 80, Height = 28,
+                Style = (Style)Application.Current.Resources["PlainButton"], IsCancel = true
+            };
+            cancel.Click += (_, _) => dialog.Close();
+
+            buttons.Children.Add(ok);
+            buttons.Children.Add(cancel);
+            panel.Children.Add(buttons);
+            dialog.Content = panel;
+            dialog.ShowDialog();
+
+            return string.IsNullOrWhiteSpace(result) ? null : result;
+        }
+
+        private void StartSkinServer(bool forHosting, string? version = null, string? loader = null)
         {
             if (_skinServer?.IsRunning == true) return;
 
@@ -3463,6 +3570,13 @@ namespace MinecraftLauncher.UI
                                 AdminTabs.SelectedIndex == 2) RefreshInbox();
                         });
                 }
+
+                // Set BEFORE Start, so the very first announcement already says what
+                // this server is for. A client that probed in between would otherwise
+                // cache an answer with no version on it.
+                _skinServer.HostedVersion = version;
+                _skinServer.HostedLoader = loader;
+
                 _skinServer.Start();
                 _skinServerForHosting = forHosting;
                 _adoptedSkinServer = null;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -46,6 +46,7 @@ namespace MinecraftLauncher.Tests
                 new("fleet",      false, () => Task.Run(FleetTests.Run)),
                 new("blocks",     false, () => Task.Run(PlayBlockTests.Run)),
                 new("loaderpolicy",false, () => Task.Run(LoaderPolicyTests.Run)),
+                new("discovery",  false, () => Task.Run(SkinDiscoveryTests.Run)),
                 new("packs",      false, FabricPackTests.RunAsync),
                 new("serverpacks",false, FabricServerPackTests.RunAsync),
                 new("modrinth",   true,  ModrinthTests.RunAsync)

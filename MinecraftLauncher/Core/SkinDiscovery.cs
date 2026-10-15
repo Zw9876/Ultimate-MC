@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -31,10 +31,137 @@ namespace MinecraftLauncher.Core
 
         private static readonly Regex RxReply = new(@"^MCSKINSERVER:(\d+)$", RegexOptions.Compiled);
 
+        /// <summary>
+        /// The second, richer announcement. Sent ALONGSIDE the legacy line above and
+        /// never instead of it.
+        /// </summary>
+        /// <remarks>
+        /// The legacy reply is matched by every launcher already in the fleet with an
+        /// anchored regex, so appending fields to that line would make all of them see
+        /// no skin server whatever. Hence a separate datagram, which those launchers
+        /// fail to match and skip. Key=value pairs rather than positional fields for
+        /// the same reason, one layer on: the next field to be added must not break
+        /// this parser the way adding one to the first line would have.
+        /// </remarks>
+        private const string ReplyV2Prefix = "MCSKINSERVER2:";
+
+        /// <summary>What a responder said about itself.</summary>
+        private sealed record Announcement(
+            int Port, string? Machine, bool IsAdmin, string? Version, string? Loader);
+
+        private static string? OrNull(string s) =>
+            string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        /// <summary>Reads either announcement form, or null if it is neither.</summary>
+        internal static bool TryParseAnnouncement(
+            string text, out int port, out string? machine,
+            out bool admin, out string? version, out string? loader)
+        {
+            var a = ParseAnnouncement(text);
+            port = a?.Port ?? 0;
+            machine = a?.Machine;
+            admin = a?.IsAdmin ?? false;
+            version = a?.Version;
+            loader = a?.Loader;
+            return a is not null;
+        }
+
+        private static Announcement? ParseAnnouncement(string text)
+        {
+            text = (text ?? string.Empty).Trim();
+
+            var m = RxReply.Match(text);
+            if (m.Success && int.TryParse(m.Groups[1].Value, out int legacy))
+                return new Announcement(legacy, null, false, null, null);
+
+            if (!text.StartsWith(ReplyV2Prefix, StringComparison.Ordinal)) return null;
+
+            int port = 0;
+            string? machine = null, version = null, loader = null;
+            bool admin = false;
+
+            foreach (string pair in text[ReplyV2Prefix.Length..]
+                                   .Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = pair.IndexOf('=');
+                if (eq < 0) continue;
+
+                string key = pair[..eq].Trim().ToLowerInvariant();
+                string val = pair[(eq + 1)..];
+
+                switch (key)
+                {
+                    case "port":    int.TryParse(val.Trim(), out port); break;
+                    case "machine": machine = OrNull(val); break;
+                    case "admin":   admin = val.Trim() is "1" or "true"; break;
+                    case "mc":      version = OrNull(val); break;
+                    case "loader":  loader = OrNull(val); break;
+                    // Unknown keys ignored on purpose, so a newer host can announce
+                    // more without this build treating the whole reply as rubbish.
+                }
+            }
+
+            return port > 0 ? new Announcement(port, machine, admin, version, loader) : null;
+        }
+
+        private static bool Same(string? a, string? b) =>
+            string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Records a responder, keeping the more informative of two replies from the
+        /// same address.
+        /// </summary>
+        /// <remarks>
+        /// An up-to-date server sends BOTH announcements, so one address arrives twice
+        /// and the richer reply has to win regardless of which order they turn up in.
+        /// The original code kept a HashSet of addresses and skipped the repeat, which
+        /// here would silently discard everything the second datagram exists to carry
+        /// whenever the legacy line happened to arrive first - and it usually would,
+        /// being sent first.
+        /// </remarks>
+        internal static void Merge(IDictionary<string, Found> byAddress, Found found)
+        {
+            if (byAddress.TryGetValue(found.Address, out var already) &&
+                already.Describes && !found.Describes)
+                return;
+
+            byAddress[found.Address] = found;
+        }
+
+        /// <summary>
+        /// The responder allowed to say whether anyone may play, out of those found.
+        /// </summary>
+        /// <remarks>
+        /// Never falls back to a non-admin responder. Returning "some machine" when no
+        /// admin host answered is precisely the behaviour that let a peer tell clients
+        /// that play was allowed; a null here means "ask nobody", and the caller then
+        /// uses its cached answer rather than assuming the best.
+        /// </remarks>
+        internal static Found? PickAdmin(IReadOnlyList<Found> found) =>
+            found.FirstOrDefault(f => f.IsAdmin && !f.IsLocal)
+            ?? found.FirstOrDefault(f => f.IsAdmin);
+
         /// <summary>A skin server that answered a discovery broadcast.</summary>
         /// <param name="Address">"ip:port", ready to use as a base address.</param>
         /// <param name="IsLocal">True when it is running on this machine.</param>
-        public sealed record Found(string Address, IPAddress Ip, int Port, bool IsLocal);
+        /// <param name="Machine">Computer name, when the responder said.</param>
+        /// <param name="IsAdmin">
+        /// The responder holds <c>admin.flag</c>. Only such a machine may decide
+        /// whether anyone is allowed to play.
+        /// </param>
+        /// <param name="Version">The Minecraft version this skin server is for.</param>
+        /// <param name="Loader">Its loader, where one was named.</param>
+        public sealed record Found(
+            string Address, IPAddress Ip, int Port, bool IsLocal,
+            string? Machine = null, bool IsAdmin = false,
+            string? Version = null, string? Loader = null)
+        {
+            /// <summary>
+            /// True when this responder told us anything beyond its port, i.e. it is
+            /// new enough to send the second announcement.
+            /// </summary>
+            public bool Describes => Machine is not null || Version is not null || IsAdmin;
+        }
 
         /// <summary>
         /// Resolves the skin server address ("ip:port") or null if none found.
@@ -63,13 +190,75 @@ namespace MinecraftLauncher.Core
         public static Found? FindRemote() => Discover().FirstOrDefault(f => !f.IsLocal);
 
         /// <summary>
+        /// The skin server to use for a particular game, or null if none answered.
+        /// </summary>
+        /// <remarks>
+        /// Skins belong with the Minecraft server being played, so a responder hosting
+        /// that version beats one that merely answered the broadcast first. Several
+        /// skin servers on one LAN is a normal arrangement rather than a mistake: each
+        /// belongs to the Minecraft server on its machine.
+        /// </remarks>
+        public static string? ResolveForSkins(AppConfig config, string? version, string? loader)
+        {
+            if (!string.IsNullOrWhiteSpace(config.SkinServer))
+                return config.SkinServer!.Trim();
+
+            return Select(Discover(), version, loader)?.Address;
+        }
+
+        /// <summary>Picks the best responder for a given game. Separated out to be tested.</summary>
+        internal static Found? Select(IReadOnlyList<Found> found, string? version, string? loader)
+        {
+            if (found.Count == 0) return null;
+
+            // Remote still beats local, and for the original reason: binding a player
+            // to a stray server on their own machine means everyone else turns up with
+            // a default skin and nothing reports an error. Version matching happens
+            // WITHIN that preference, not instead of it.
+            var remote = found.Where(f => !f.IsLocal).ToList();
+            var pool = remote.Count > 0 ? remote : found.ToList();
+
+            if (!string.IsNullOrWhiteSpace(version))
+            {
+                var exact = pool.FirstOrDefault(
+                    f => Same(f.Version, version) && Same(f.Loader, loader));
+                if (exact is not null) return exact;
+
+                // Loader unstated or different: the version alone is enough to be the
+                // right skin server, and the manual picker only asks for a version.
+                var sameVersion = pool.FirstOrDefault(f => Same(f.Version, version));
+                if (sameVersion is not null) return sameVersion;
+            }
+
+            return pool[0];
+        }
+
+        /// <summary>
+        /// The machine allowed to decide whether anyone may play, or null if none
+        /// answered.
+        /// </summary>
+        /// <remarks>
+        /// Pausing, blocking, session shutdown and check-in all resolve through here
+        /// and NOT through skin discovery. Every launcher serves those endpoints, and a
+        /// launcher that is not the admin host answers "nothing happening" perfectly
+        /// truthfully from its own empty play-blocks.json - so a client that bound to
+        /// whichever server answered first would be told it could play. That is exactly
+        /// why a pause once reached only some of the fleet.
+        ///
+        /// config.SkinServer is deliberately NOT honoured: that override exists to
+        /// point skins at a chosen machine, and it must not be able to make an
+        /// arbitrary machine the authority on who is allowed to play.
+        /// </remarks>
+        public static Found? FindAdmin() => PickAdmin(Discover());
+
+        /// <summary>
         /// Broadcasts for skin servers and collects every distinct reply. Returns
         /// early once a remote server answers, since that is already the preferred
         /// result and waiting longer only delays the launch.
         /// </summary>
         public static IReadOnlyList<Found> Discover()
         {
-            var results = new List<Found>();
+            var byAddress = new Dictionary<string, Found>(StringComparer.OrdinalIgnoreCase);
             try
             {
                 using var udp = new UdpClient { EnableBroadcast = true };
@@ -77,7 +266,6 @@ namespace MinecraftLauncher.Core
                 udp.Send(probe, probe.Length, new IPEndPoint(IPAddress.Broadcast, DiscoveryPort));
 
                 var local = LocalAddresses();
-                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 DateTime deadline = DateTime.UtcNow + ProbeWindow;
 
                 while (true)
@@ -92,20 +280,30 @@ namespace MinecraftLauncher.Core
                     try { reply = udp.Receive(ref remote); }
                     catch (SocketException) { break; }   // nothing more arrived
 
-                    var m = RxReply.Match(Encoding.ASCII.GetString(reply).Trim());
-                    if (!m.Success || !int.TryParse(m.Groups[1].Value, out int port)) continue;
+                    if (!TryParseAnnouncement(
+                            Encoding.ASCII.GetString(reply),
+                            out int port, out string? machine,
+                            out bool admin, out string? version, out string? loader))
+                        continue;
 
                     string address = $"{remote.Address}:{port}";
-                    if (!seen.Add(address)) continue;
-
                     bool isLocal = local.Contains(remote.Address);
-                    results.Add(new Found(address, remote.Address, port, isLocal));
 
-                    // A remote host is what we want; stop rather than stall the launch.
-                    if (!isLocal) break;
+                    var found = new Found(
+                        address, remote.Address, port, isLocal,
+                        machine, admin, version, loader);
 
-                    // Only ours answered so far — wait a little longer, but not the
-                    // full window, or every offline launch pays for it.
+                    Merge(byAddress, found);
+
+                    // Stop only for a remote host that claims admin: it answers both
+                    // questions a launch asks - whose skins, and who says whether play
+                    // is allowed - so there is nothing better left to wait for.
+                    if (!isLocal && (found.IsAdmin || byAddress[address].IsAdmin)) break;
+
+                    // Otherwise something answered but is not authoritative. Wait a
+                    // little longer in case the admin host answers too, but not the
+                    // full window - paying that on every launch is what the original
+                    // early break was avoiding.
                     var settle = DateTime.UtcNow + SettleWindow;
                     if (settle < deadline) deadline = settle;
                 }
@@ -114,7 +312,7 @@ namespace MinecraftLauncher.Core
             {
                 // Discovery is best-effort; callers treat "none" as "not hosted".
             }
-            return results;
+            return byAddress.Values.ToList();
         }
 
         /// <summary>Every IPv4 address this machine answers on, including loopback.</summary>

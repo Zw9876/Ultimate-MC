@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net.Http;
 using System.Text;
@@ -71,7 +71,10 @@ namespace MinecraftLauncher.Core
 
                 if (string.IsNullOrWhiteSpace(host))
                 {
-                    try { host = (await Task.Run(SkinDiscovery.FindRemote, ct))?.Address; }
+                    // FindAdmin, not FindRemote: a check-in that reached a peer is
+                    // why machines went missing from the fleet list altogether - they
+                    // reported themselves to somebody who was not keeping the roster.
+                    try { host = (await Task.Run(SkinDiscovery.FindAdmin, ct))?.Address; }
                     catch (Exception) { return false; }
                 }
             }
