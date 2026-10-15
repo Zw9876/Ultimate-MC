@@ -558,6 +558,40 @@ including where WebView2 is loaded from — depends on it.
     updates mid-evening still ignores a pause until that game is restarted — the
     same standing limitation already recorded for session shutdown, and it applies
     here too.
+  - **Then it bit again on 2026-10-14 with the fleet up to date, for a completely
+    different reason: clients were asking the wrong computer.** No endpoint is gated
+    on `admin.flag`, so every launcher serves `/launcher/blocks` and
+    `/launcher/shutdown`; a skin server starts whenever anybody hosts a Minecraft
+    server; and discovery took the **first remote reply**. A peer answered "nothing
+    happening" perfectly truthfully out of its own empty `play-blocks.json`. And
+    `GameWatcher.Spawn` was handed `launched.SkinServerAddress` outright, so a
+    running game polled the skin server it had bound to *for skins*.
+
+    Fixed by separating the two questions rather than by preventing a second skin
+    server, because several on one LAN is the intended arrangement — each belongs to
+    the Minecraft server on its machine:
+
+    | question | resolves to |
+    |---|---|
+    | whose skins? | `SkinDiscovery.ResolveForSkins(config, version, loader)` — the server hosting that version; remote still beats local |
+    | who says whether I may play? | `SkinDiscovery.FindAdmin()` — `admin.flag` only, returning **null** rather than falling back to a peer |
+
+    A skin server now announces what it is for, and starting one from the Skins tab
+    requires picking a version from `VersionScanner.HostableVersions()`. Five control
+    paths moved onto `FindAdmin`: the PLAY gate, the watcher and its rediscovery,
+    check-in, the update lookup and required mods. The last two mattered more than
+    expected — the startup check-in reuses the update lookup's address, so **the
+    machines that ignored the pause were the same ones missing from the FLEET list**
+    that was supposed to say whether the fleet was caught up.
+
+    `FindAdmin` ignores `config.SkinServer` deliberately. That override points skins
+    at a chosen machine; if it could also choose who decides whether play is allowed,
+    anybody could escape a ban by editing one line of their own config.
+
+    **`PlayBlocks.ControlFloor` is now the floor that governs** — the computed maximum
+    of `PauseFloor`, `BlockFloor` and the new `RouteFloor` (1.2.287.135). Understanding
+    a pause is no use while the question goes elsewhere, and from the host the two look
+    identical. The FLEET panel and the block dialog both warn from it.
 
     **So the host is now told.** `PlayBlocks.CanObey` compares each checked-in
     machine's reported build against `PauseFloor` / `BlockFloor`, and the warning
@@ -1088,14 +1122,21 @@ once before the host can close it for them.
 
 What is genuinely outstanding:
 
-0. **Put 1.2.286.213 on the host.** Everything below matters less than this: it is
+0. **Put 1.2.287.184 on the host.** Everything below matters less than this: it is
    what turns rollout from a chore into something that happens by itself — and it is
    now also what makes the fleet visible instead of guessed at.
 
-   **Until the fleet has this build, pausing and blocking reach nobody.** That is not
-   a bug and it is now visible: a client older than 1.2.285.145 does not understand a
-   pause, 1.2.285.114 a block, and the FLEET panel says how many cannot obey. See the
-   pause entry in section 5.
+   **Until the fleet has this build, pausing and blocking cannot be relied on, and
+   this has now failed twice for two different reasons.** A client older than
+   1.2.285.145 does not understand a pause at all; one older than **1.2.287.135**
+   understands it perfectly and may still ask a *peer* rather than this host, which
+   from here looks exactly the same. `PlayBlocks.ControlFloor` is the maximum of the
+   three floors and the FLEET panel warns from it. See the pause entry in section 5.
+
+   **One check worth doing on the way:** check-in travelled the same broken path, so
+   the machines that ignored the last pause should be the same ones missing or stale
+   in the FLEET list. If that lines up it is confirmation; if it does not, something
+   else is going on and the discovery fix is not the whole story.
 
    **Be honest about what is actually out there, because it is not known.** The last
    build confirmed to have reached the machines is **1.2.265.376**. Everything since
@@ -1977,7 +2018,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **841 offline checks in about 7 seconds**, and around 930 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
+`MinecraftLauncher.Tests/` — **888 offline checks in about 7 seconds**, and around 930 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
 
 ```powershell
 tools\run-tests.ps1                 # everything
@@ -2014,7 +2055,8 @@ sessions before being kept:
 | `Verify-AutoUpdate.ps1` | The whole mandatory-update path, unattended: a newer host serving, an older client nobody touches, and the client swapping itself byte-for-byte and relaunching. Needs a Debug build **and** a Release publish made at least a minute later, so the host is the newer one. |
 | `Verify-Admin.ps1` | The Admin tab end to end: that the three sub-tabs render at all (a retemplated `TabControl` can show headers over an empty panel — section 11), that a check-in and a crash report posted exactly as another machine would post them are accepted, refused when malformed, and not stored twice, and that the host's own panels then *show* them. 36/36 on 2026-10-07. Creates `admin.flag` if absent and removes it again. |
 | `Verify-Backups.ps1` | The backup buttons on both tabs, against a throwaway world placed in the real saves folder: that the zip appears, opens again, keeps `level.dat` and the region data, and leaves `session.lock` out. `-IncludeServerWorld` additionally backs up the real server world — 110 MB, 297 files, **3 s**, 69.8 MB — and keeps it. 26/26 on 2026-10-07. Also fails if anything reached `launcher_errors.txt`, since that is where an invisible `MessageBox` leaves its evidence. |
-| `Verify-Pause.ps1` | **Pausing everyone, end to end, without launching Minecraft.** Sets a pause, starts the skin server, checks the shutdown channel announces it *and not as a shutdown*, then starts a **real game watcher** pointed at a stand-in window and asserts the window is closed, that the notice shown is the one that cannot be declined, and that the watcher then exits so the exe is free for an update. Finally presses PLAY and asserts it is refused and no Java appears. Pins itself with `SKIN_SERVER=` and needs `admin.flag` absent. 18/18 on 2026-10-12. `-OldLauncher <exe>` additionally proves what a client from before the feature does with the same pause — nothing — which is the likeliest reason a pause looks broken on a fleet that has not finished updating. Extract a previous rollout zip to get one. 21/21 on 2026-10-13 against 1.2.280.291. |
+| `tools\Uia-Combo.ps1` | **Not a test** — shared UI Automation helpers for selecting a ComboBox value, dot-sourced by the four scripts that start a skin server. It expands the ComboBox before looking inside, because WPF virtualises the items: searching a collapsed one finds nothing and looks exactly like a list offering nothing. It selects an *item* rather than setting text, because `ValuePattern.SetValue` does not update `ComboBox.Text` — section 11. |
+| `Verify-Pause.ps1` | **Pausing everyone, end to end, without launching Minecraft.** Sets a pause, starts the skin server, checks the shutdown channel announces it *and not as a shutdown*, then starts a **real game watcher** pointed at a stand-in window and asserts the window is closed, that the notice shown is the one that cannot be declined, and that the watcher then exits so the exe is free for an update. Finally presses PLAY and asserts it is refused and no Java appears. Pins itself with `SKIN_SERVER=` and needs `admin.flag` absent. 18/18 on 2026-10-12. `-OldLauncher <exe>` additionally proves what a client from before the feature does with the same pause — nothing — which is the likeliest reason a pause looks broken on a fleet that has not finished updating. Extract a previous rollout zip to get one. 21/21 on 2026-10-13 against 1.2.280.291.<br><br>**27/27 on 2026-10-14**, after the hole that let the second failure through was closed: every watcher check used to be started with `--host`, so the test supplied the very answer that was wrong in the field and could not have failed whatever discovery did. Two cases now make the watcher resolve a host itself, with **no `--host`**, and the pair is what discriminates — **A** with `admin.flag` present must find this host and close the game, **B** with it absent must find *nobody* and leave the game alone. A is the control for B, since B asserts a negative that would also pass if the watcher had crashed on startup. Both run against one server by creating and deleting the flag underneath it, which works only because the announcement reads it per request. It also checks the legacy `MCSKINSERVER:<port>` datagram still arrives unchanged beside the new one, against a real server. The PLAY-gate section now seeds the cache, because `SKIN_SERVER=` deliberately no longer reaches the control path and `admin.flag` cannot be used instead — a machine holding it is exempt from pauses, so on one machine you cannot be both the authority and a subject. |
 | `Verify-Blocks.ps1` | **The one check in the play-block feature that counts.** Plants a block for this machine in the cache, presses PLAY on a real launcher, and asserts on *behaviour*: a dialog appeared, the launcher did **not** close, and **no Java process started**. Then does it again with an expired block and asserts nothing happens. Needs `admin.flag` absent — that machine is never blocked — which is why it is not part of `Verify-Admin.ps1`. 10/10 on 2026-10-12. |
 | `Build-RolloutZip.ps1` | Builds both zips, refusing to write an update zip that contains anything host-only. See section 8. |
 | `Diagnose-MinecraftNet.ps1` | Why Minecraft cannot reach the internet on a machine — see section 10. |
