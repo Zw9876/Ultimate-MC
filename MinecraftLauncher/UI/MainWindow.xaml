@@ -1,4 +1,4 @@
-<Window x:Class="MinecraftLauncher.UI.MainWindow"
+﻿<Window x:Class="MinecraftLauncher.UI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Minecraft Portable Launcher"
@@ -708,6 +708,7 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0" VerticalAlignment="Center">
@@ -718,7 +719,21 @@
                                        Text="Starts automatically when you host a server. Players on the LAN find it by themselves."/>
                         </StackPanel>
 
-                        <Button Grid.Column="1" x:Name="SkinServerToggle" Content="Start"
+                        <!--
+                            A skin server belongs to a Minecraft server, so it has to say
+                            which one: clients pick the skin server for the version they
+                            are launching. On the tab rather than in a dialog on purpose -
+                            it stays visible, and a modal here would block the
+                            InvokePattern click that four verification scripts use.
+                        -->
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                            <TextBlock Text="For version" Foreground="{StaticResource MutedBrush}"
+                                       FontSize="11" Margin="0,0,0,3"/>
+                            <ComboBox x:Name="HostedVersionPicker" Width="140" Height="30"
+                                      ToolTip="Which Minecraft server this skin server is for. Players launching this version will use this machine's skins."/>
+                        </StackPanel>
+
+                        <Button Grid.Column="2" x:Name="SkinServerToggle" Content="Start"
                                 Width="90" Height="30" VerticalAlignment="Center"
                                 Click="SkinServerToggle_Click" Style="{StaticResource PlainButton}"/>
                     </Grid>

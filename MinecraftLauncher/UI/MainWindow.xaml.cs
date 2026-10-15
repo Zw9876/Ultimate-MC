@@ -3430,7 +3430,19 @@ namespace MinecraftLauncher.UI
                         MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
-                if (PromptForHostedVersion() is not { } chosen) return;
+                // Chosen deliberately, not defaulted: this server is about to tell
+                // the LAN which Minecraft server it belongs to, and guessing that
+                // wrong sends players to the wrong machine's skins.
+                if (HostedVersionPicker.SelectedItem is not string chosen)
+                {
+                    MessageBox.Show(
+                        "Pick which Minecraft version this skin server is for first.\n\n" +
+                        "Players launching that version will use this machine's skins, so " +
+                        "it needs to match the Minecraft server running here.",
+                        "Which version?", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
                 StartSkinServer(forHosting: false, version: chosen);
             }
             finally { SkinServerToggle.IsEnabled = true; }
@@ -3446,99 +3458,6 @@ namespace MinecraftLauncher.UI
             _adoptedSkinServer = remote?.Address;
             UpdateSkinServerUi();
             return remote;
-        }
-
-        /// <summary>
-        /// Asks which Minecraft version this skin server is being started for, or null
-        /// if the person cancelled.
-        /// </summary>
-        /// <remarks>
-        /// A skin server belongs to a Minecraft server, so it has to say which one.
-        /// Clients pick the skin server for the version they are launching, and one
-        /// that announced no version is only ever a fallback.
-        ///
-        /// A ListBox rather than an editable ComboBox on purpose. ValuePattern.SetValue
-        /// does not update ComboBox.Text, which once made a dialog impossible to drive
-        /// from a test in either direction - so the selection is an item, which
-        /// SelectionItemPattern can actually set. Handoff section 11.
-        /// </remarks>
-        private static string? PromptForHostedVersion()
-        {
-            var versions = VersionScanner.HostableVersions();
-            if (versions.Count == 0)
-            {
-                MessageBox.Show(
-                    "No Minecraft versions are installed, so there is nothing for a " +
-                    "skin server to be for.\n\nInstall a version on the Client or " +
-                    "Server tab first.",
-                    "Nothing to host", MessageBoxButton.OK, MessageBoxImage.Information);
-                return null;
-            }
-
-            var dialog = new Window
-            {
-                Title = "Which version is this skin server for?",
-                Width = 420,
-                // SizeToContent with Auto rows, never a fixed Height: a fixed height
-                // plus a star row is what once squeezed a text box underneath a
-                // button and made it look absent. Handoff section 11.
-                SizeToContent = SizeToContent.Height,
-                MaxHeight = 560,
-                WindowStartupLocation = WindowStartupLocation.CenterScreen,
-                ResizeMode = ResizeMode.NoResize,
-                Background = (System.Windows.Media.Brush)Application.Current.Resources["BgBrush"]
-            };
-
-            var panel = new StackPanel { Margin = new Thickness(16) };
-            panel.Children.Add(new TextBlock
-            {
-                Text = "Players launching this version will use this machine's skins. " +
-                       "Pick the version of the Minecraft server running here.",
-                Foreground = (System.Windows.Media.Brush)Application.Current.Resources["TextBrush"],
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 0, 0, 10)
-            });
-
-            var list = new ListBox
-            {
-                Name = "HostedVersionList",
-                MaxHeight = 300,
-                Background = (System.Windows.Media.Brush)Application.Current.Resources["BgBrush"],
-                Foreground = (System.Windows.Media.Brush)Application.Current.Resources["TextBrush"]
-            };
-            foreach (string v in versions) list.Items.Add(v);
-            list.SelectedIndex = versions.Count - 1;      // newest, which is the usual answer
-            panel.Children.Add(list);
-
-            var buttons = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Margin = new Thickness(0, 14, 0, 0)
-            };
-
-            string? result = null;
-            var ok = new Button
-            {
-                Content = "Start", Width = 80, Height = 28, Margin = new Thickness(0, 0, 8, 0),
-                Style = (Style)Application.Current.Resources["PlainButton"], IsDefault = true
-            };
-            ok.Click += (_, _) => { result = list.SelectedItem as string; dialog.Close(); };
-
-            var cancel = new Button
-            {
-                Content = "Cancel", Width = 80, Height = 28,
-                Style = (Style)Application.Current.Resources["PlainButton"], IsCancel = true
-            };
-            cancel.Click += (_, _) => dialog.Close();
-
-            buttons.Children.Add(ok);
-            buttons.Children.Add(cancel);
-            panel.Children.Add(buttons);
-            dialog.Content = panel;
-            dialog.ShowDialog();
-
-            return string.IsNullOrWhiteSpace(result) ? null : result;
         }
 
         private void StartSkinServer(bool forHosting, string? version = null, string? loader = null)
@@ -3608,14 +3527,34 @@ namespace MinecraftLauncher.UI
         {
             if (SkinServerStatus is null) return;
 
+            // Filled here rather than at load: a version installed since the launcher
+            // opened should appear without restarting it. Left unselected on purpose,
+            // so starting a server is an explicit answer to "for which one".
+            if (HostedVersionPicker is not null && HostedVersionPicker.Items.Count == 0)
+            {
+                foreach (string v in VersionScanner.HostableVersions())
+                    HostedVersionPicker.Items.Add(v);
+            }
+
             if (_skinServer?.IsRunning == true)
             {
+                string forWhat = string.IsNullOrWhiteSpace(_skinServer.HostedVersion)
+                    ? " It announces no version, so it is only ever a fallback."
+                    : $" Serving skins for {_skinServer.HostedVersion}.";
+
                 SkinServerStatus.Text =
                     $"Skin server: running on {_skinServer.HostIp}:{_skinServer.Port}" +
                     (_skinServerForHosting
                         ? " — started automatically for the Minecraft server you are hosting."
-                        : " — started from this tab.");
+                        : " — started from this tab.") + forWhat;
                 SkinServerToggle.Content = "Stop";
+
+                // Reflect what is actually being served, which for the hosting path was
+                // never chosen here.
+                if (HostedVersionPicker is not null &&
+                    _skinServer.HostedVersion is { Length: > 0 } running &&
+                    HostedVersionPicker.Items.Contains(running))
+                    HostedVersionPicker.SelectedItem = running;
             }
             else if (_adoptedSkinServer is not null)
             {

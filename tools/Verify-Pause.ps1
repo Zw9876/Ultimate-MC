@@ -167,6 +167,13 @@ if (-not $w) { exit 1 }
 
 Pick (ByName $w 'SKINS')
 Start-Sleep -Seconds 2
+# The skin server now has to say which Minecraft server it belongs to, so a
+# version must be chosen before it will start. Clients pick the skin server for
+# the version they are launching rather than whichever answered first.
+. (Join-Path $PSScriptRoot 'Uia-Combo.ps1')
+$chosenVersion = Select-ComboNewest $w 'HostedVersionPicker'
+Write-Output "  (skin server for version: $chosenVersion)"
+Check 'a version can be chosen for the skin server' (-not [string]::IsNullOrWhiteSpace($chosenVersion)) 'the picker offered nothing'
 Click (ById $w 'SkinServerToggle')
 Start-Sleep -Seconds 5
 
@@ -269,6 +276,126 @@ if (-not $standUp) {
           'the watcher is still running, so a self-update would be blocked'
 }
 
+# ---- the watcher has to FIND the host, not be handed it ----
+#
+# Everything above passes --host to the watcher, and that is how this script
+# missed the second failure of this feature completely.
+#
+# On 2026-10-14 pausing was turned on with the fleet confirmed up to date and it
+# reached only some machines. Nothing was wrong with the pause: clients were
+# asking the wrong computer. No endpoint is gated on admin.flag, so every
+# launcher serves /launcher/shutdown; a skin server starts whenever anybody hosts
+# a Minecraft server; discovery took the FIRST REMOTE REPLY; and a peer answered
+# "nothing happening" perfectly truthfully out of its own empty play-blocks.json.
+# Worse, GameWatcher.Spawn was handed launched.SkinServerAddress outright, so a
+# running game polled the skin server it had bound to for SKINS.
+#
+# A test that supplies the correct address cannot see any of that. So these two
+# cases make the watcher resolve a host by itself, and the PAIR is what
+# discriminates:
+#
+#   A  admin.flag present  -> it must find this host and close the game
+#   B  admin.flag absent   -> it must find NOBODY and leave the game alone
+#
+# B is the regression. On the old code the watcher discovered this same server
+# either way, polled it, saw the pause and closed the game. A on its own would
+# still pass with discovery broken in the other direction - finding nothing at
+# all - which is why both are here and why neither is enough alone.
+#
+# Both run against the SAME running skin server: the announcement reads
+# admin.flag per request rather than caching it at startup, so the flag can be
+# created and deleted underneath it.
+
+function Probe-Announcements($discoveryPort) {
+    $udp = New-Object Net.Sockets.UdpClient
+    try {
+        $udp.Client.ReceiveTimeout = 2000
+        $probe = [Text.Encoding]::ASCII.GetBytes('MCSKINSERVER_DISCOVER')
+        [void]$udp.Send($probe, $probe.Length, '127.0.0.1', $discoveryPort)
+
+        $got = @()
+        for ($i = 0; $i -lt 2; $i++) {
+            $ep = New-Object Net.IPEndPoint([Net.IPAddress]::Any, 0)
+            try { $got += [Text.Encoding]::ASCII.GetString($udp.Receive([ref]$ep)) }
+            catch { break }
+        }
+        return $got
+    } finally { $udp.Close() }
+}
+
+Write-Output ''
+Write-Output '  -- the watcher resolving a host for itself --'
+
+$ann = @(Probe-Announcements ($port + 1))
+Write-Output "  announcements: $($ann -join '  |  ')"
+
+# The compatibility property, checked against the REAL server rather than a unit
+# test: launchers already in the field match ^MCSKINSERVER:(\d+)$ anchored, so if
+# the new fields ever moved onto that line every one of them would see no skin
+# server whatever.
+$legacy = @($ann | Where-Object { $_.Trim() -match '^MCSKINSERVER:\d+$' })
+Check 'the legacy announcement is still sent unchanged' ($legacy.Count -eq 1) `
+      "no plain MCSKINSERVER:<port> line in: $($ann -join ' | ')"
+
+$rich = @($ann | Where-Object { $_ -like 'MCSKINSERVER2:*' })
+Check 'and a second, richer one beside it' ($rich.Count -eq 1) `
+      "no MCSKINSERVER2: line in: $($ann -join ' | ')"
+
+if ($rich.Count -eq 1) {
+    Check 'which names the version it serves' ($rich[0] -match 'mc=') $rich[0]
+    Check 'and the machine it is on' ($rich[0] -match "machine=$([regex]::Escape($env:COMPUTERNAME))") $rich[0]
+}
+
+function Run-DiscoveryCase($label, $withFlag, $shouldClose) {
+    if ($withFlag) { Set-Content $flag '' -Encoding ASCII }
+    else { Remove-Item $flag -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 2
+
+    # Confirm the server is announcing what this case needs BEFORE drawing any
+    # conclusion from what the watcher does. Otherwise a case that silently set
+    # itself up wrong reads as a result about the watcher.
+    $a = @(Probe-Announcements ($port + 1) | Where-Object { $_ -like 'MCSKINSERVER2:*' })
+    $claims = ($a.Count -eq 1 -and $a[0] -match 'admin=1')
+    Check "$label - the server claims admin=$(if ($withFlag) { '1' } else { '0' })" `
+          ($claims -eq $withFlag) "announced: $($a -join ' | ')"
+
+    $s2 = Start-Process powershell -PassThru -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $standInFile)
+
+    $up = WaitForTitle 'Stand-in for Minecraft' 20
+    if (-not $up) {
+        Check "$label - a stand-in game is running" $false 'no window appeared'
+        Get-Process -Id $s2.Id -ErrorAction SilentlyContinue | Stop-Process -Force
+        return
+    }
+
+    # NO --host. That is the entire point of this section.
+    $w2 = Start-Process $exe -PassThru -ArgumentList @(
+        '--watch-game', $s2.Id, '--mc', '26.1.2')
+
+    $closed = $false
+    for ($i = 0; $i -lt 70; $i++) {
+        Start-Sleep -Milliseconds 500
+        if (-not (Get-Process -Id $s2.Id -ErrorAction SilentlyContinue)) { $closed = $true; break }
+    }
+
+    if ($shouldClose) {
+        Check "$label - the watcher found the host itself and closed the game" $closed `
+              'still running after 35s, so discovery found no admin host'
+    } else {
+        Check "$label - a server with no admin.flag has no authority, so play continues" `
+              (-not $closed) `
+              'the game was closed by a machine that is not the admin host'
+    }
+
+    Get-Process -Id $s2.Id -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process -Id $w2.Id -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Seconds 2
+}
+
+Run-DiscoveryCase 'A (admin.flag present)' $true  $true
+Run-DiscoveryCase 'B (admin.flag absent)'  $false $false
+
 # ---- what an OLD client does with the same pause ----
 #
 # The case that matters in the field, and the one easy to mistake for a broken
@@ -336,6 +463,25 @@ else {
 }
 
 # ---- and nobody can start a game while it lasts ----
+
+# Seeded from the master list on purpose, and this is not a convenience.
+#
+# The PLAY gate asks the ADMIN host now, and admin.flag is absent here because a
+# machine holding it is exempt from pauses by design. So on this one machine
+# there is no admin host to ask - FindAdmin returns nothing rather than trusting
+# the local non-admin server, which is the whole fix - and the gate falls through
+# to what it remembers.
+#
+# SKIN_SERVER= no longer reaches this path either, deliberately: that override
+# points SKINS at a chosen machine, and if it could also choose who decides
+# whether play is allowed then anyone could escape a ban by editing one line of
+# their own config.
+#
+# So what is actually under test below is the fail-safe that was chosen for an
+# absent host: obey the cached answer, so a pause set at 4pm still holds at 6pm
+# once the host has gone home.
+Copy-Item $blocks $cache -Force
+Write-Output '  (seeded play-blocks-cache.json: with no admin host up, the gate uses the cache)'
 
 # Back to the Client tab first: WPF drops a collapsed panel out of the UI
 # Automation tree, so while the Skins tab is showing there is no PlayButton to

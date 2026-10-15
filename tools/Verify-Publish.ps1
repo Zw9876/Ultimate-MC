@@ -59,6 +59,12 @@ if ((ById $w 'VersionLabel')) { Write-Host "  sidebar says: $((ById $w 'VersionL
 
 (ByName $w 'SKINS').GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
 Start-Sleep -Seconds 2
+# The skin server now has to say which Minecraft server it belongs to, so a
+# version must be chosen before it will start. Clients pick the skin server for
+# the version they are launching rather than whichever answered first.
+. (Join-Path $PSScriptRoot 'Uia-Combo.ps1')
+$chosenVersion = Select-ComboNewest $w 'HostedVersionPicker'
+Write-Output "  (skin server for version: $chosenVersion)"
 (ById $w 'SkinServerToggle').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
 Start-Sleep -Seconds 5
 
