@@ -1181,7 +1181,38 @@ What is genuinely outstanding:
    waits for Enter before closing — the first run was lost because the window shut on
    it. Send that file.
 
-   **One run has come back (2026-10-14), and it does not mean what it appears to.**
+   **A second run came back on 2026-10-16, from `MAHD2300906006`, and it changes
+   the picture twice over.**
+
+   - **There is no proxy.** `ProxyEnable` unset, no PAC, no WPAD, WinHTTP reports
+     direct access, and the same Mojang URL returns **200 direct, 200 via proxy and
+     200 via proxy with credentials**. The .NET Framework versus .NET 10 proxy
+     hypothesis below is **dead**. It was a good hypothesis and it was wrong.
+   - **Every one of the 22 hosts answered**, Mojang and all four GitHub hosts
+     included, where two days earlier GitHub, both R2 endpoints, archive.org and
+     Mojang's handshake had all refused. So **the policy moves.** A host that works
+     today is not a host to build on.
+   - **ContentKeeper is inspecting TLS selectively**, and the script said the
+     opposite — section 11. It re-signs Mojang, GitHub, R2 and archive.org and
+     leaves S3, GCS, Azure Blob, Modrinth, Cloudflare and Maven alone. Its CA **is**
+     trusted on that machine, so programs accept the re-signed connections; that
+     rules TLS out as the cause of the Setup tab failure too.
+   - **`example.com` still resolves to 127.0.0.1.** The filter is live and
+     sinkholing; it is merely permissive about these hosts at the moment.
+
+   **So there is no longer a network explanation for the Setup tab.** Nothing is
+   blocked, there is no proxy, and the filter's certificate is trusted. The next
+   thing is `launcher_errors.txt` from that machine plus the exact on-screen text
+   when a version download fails — and until one of those arrives, anything said
+   about the cause is a guess.
+
+   **What the inspection partition is good for:** the hosts that kept their genuine
+   issuers are the ones the filter treats as infrastructure rather than content.
+   S3, GCS and Azure Blob are all in that set, in both runs. That is a far better
+   argument for hosting a payload there than "they handshook", and it is the only
+   durable thing either run produced.
+
+   **One run came back earlier (2026-10-14), and it did not mean what it appeared to.**
    The workstation reported GitHub blocked on all four hosts, both Cloudflare storage
    endpoints blocked while `cloudflare.com` passed — a cloud-storage *category* block,
    so R2 is out — and S3, GCS and Azure Blob reachable. Fabric reachable both hosts,
@@ -1362,6 +1393,58 @@ WPF code-behind thin.
 
 ---
 ## 11. Notable gotchas learned the hard way (so they aren't rediscovered)
+
+### The TLS-interception check has now been wrong in both directions
+
+Worth keeping in full, because the second failure looked like success.
+
+**First attempt — false positive.** It compared certificate issuers against a
+list of known-good CAs. The public CA population is large and full of short
+opaque names (`WE1`, `WE2`, `YR1`, `YE1`, `Certainly`), so it announced
+man-in-the-middle on a clean machine. A diagnostic that cries interception when
+there is none sends you somewhere expensive.
+
+**Second attempt — false negative, and worse.** It was replaced by a structural
+count with no list at all: unmolested, these hosts sit behind different CDNs and
+show many issuers; behind an inspecting proxy every one is re-signed by the same
+CA, so the issuers collapse to one. Sound reasoning — for a proxy that inspects
+*everything*.
+
+On **2026-10-16** it reported *"No sign of TLS interception: 6 different
+certificate issuers"* on a network running **ContentKeeper**, which inspects
+**selectively**. Four of those six issuers were the filter's own, re-signing
+Mojang, GitHub, R2 and archive.org, while S3, Azure, Modrinth, Cloudflare and
+Maven kept theirs. **The variety the count read as health was the signature of
+partial inspection.** There was also a named-vendor list in the script — and
+ContentKeeper simply was not on it, which is why that branch stayed quiet too.
+
+Three signals now, and the second is the one that needs no list:
+
+1. a named product in an issuer — definitive, and says which;
+2. hosts presenting an issuer they do **not** normally present, across several
+   **unrelated owners** — interception by something on no list;
+3. every issuer collapsed to one — the original whole-network case.
+
+Signal 2 compares against a per-host baseline measured on the build machine,
+which is **not** an allow-list of acceptable CAs: it is the opposite question,
+*"does this host present the issuer it normally presents?"* It never fires on
+one host alone, because CAs rotate and a single stale expectation must not be
+able to accuse a clean network. Verified by driving the real section out of the
+script against five sets of issuers — the live ContentKeeper data, the clean
+build machine, **the same interception renamed to a product the script has never
+heard of** (caught: 12 hosts across 7 owners), that case with an untrusted CA,
+and one rotated CA on an otherwise clean network (correctly says nothing).
+
+**The separate lesson, and the sharper one: "TLS ok" never meant what it looked
+like.** The handshake accepts any certificate *on purpose* — that is the only way
+an interception certificate becomes visible rather than rejected — so the column
+said a connection was possible, not that an ordinary program would accept it.
+The launcher's `HttpClient` validates. There is now a second, **validating**
+handshake per host behind a `Cert` column: `ok` where a normal client agrees,
+`BAD` where only the permissive probe succeeds. A host that is `ok` for TLS and
+`BAD` for `Cert` is reachable but unusable by anything that checks, which is
+exactly the shape of *"the network is fine but our launcher cannot download"*.
+
 
 ### Every launcher was an authority on whether anyone could play
 

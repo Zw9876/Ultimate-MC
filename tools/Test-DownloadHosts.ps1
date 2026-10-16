@@ -193,6 +193,52 @@ $targets = @(
 if ($HostingOnly)   { $targets = @($targets | Where-Object { $_.Group -ne 'minecraft' }) }
 if ($MinecraftOnly) { $targets = @($targets | Where-Object { $_.Group -ne 'hosting' }) }
 
+# WHAT EACH HOST PRESENTS ON AN UNFILTERED NETWORK.
+#
+# Measured on the build machine on 2026-10-14, not looked up. This is NOT an
+# allow-list of acceptable CAs - that was the first attempt at detecting
+# interception and it cried man-in-the-middle on a clean machine, because the
+# public CA population is large and full of short opaque names (WE1, WE2, YR1,
+# YE1, Certainly). This is the opposite question, per host: "does this host
+# present the issuer it normally presents?"
+#
+# Patterns, and several per host, because CAs rotate and these are families
+# rather than exact certificates. A single mismatch therefore proves nothing and
+# is never reported on its own - see the interception section, which requires
+# several UNRELATED hosts to mismatch at once.
+$expectedIssuer = @{
+    'piston-meta.mojang.com'                     = @('Microsoft*', 'DigiCert*')
+    'launchermeta.mojang.com'                    = @('Microsoft*', 'DigiCert*')
+    'piston-data.mojang.com'                     = @('Microsoft*', 'DigiCert*')
+    'libraries.minecraft.net'                    = @('Microsoft*', 'DigiCert*')
+    'resources.download.minecraft.net'           = @('Microsoft*', 'DigiCert*')
+    'repo1.maven.org'                            = @('WE*', 'GTS*', 'Google*')
+    'meta.fabricmc.net'                          = @('WE*', 'GTS*', 'Google*')
+    'maven.fabricmc.net'                         = @('WE*', 'GTS*', 'Google*')
+    'api.modrinth.com'                           = @('WE*', 'GTS*', 'Google*')
+    'example.com'                                = @('Cloudflare*', 'DigiCert*')
+    'github.com'                                 = @('Sectigo*', 'DigiCert*')
+    'objects.githubusercontent.com'              = @('YR*', 'YE*', 'WE*', 'GTS*', 'Sectigo*')
+    'raw.githubusercontent.com'                  = @('YR*', 'YE*', 'WE*', 'GTS*', 'Sectigo*')
+    'codeload.github.com'                        = @('Sectigo*', 'DigiCert*')
+    'cloudflare.com'                             = @('WE*', 'GTS*', 'Google*', 'Cloudflare*')
+    'r2.cloudflarestorage.com'                   = @('WE*', 'GTS*', 'Google*', 'Cloudflare*')
+    'pub-00000000000000000000000000000000.r2.dev' = @('YE*', 'YR*', 'WE*', 'GTS*', 'Cloudflare*')
+    's3.amazonaws.com'                           = @('Amazon*')
+    'storage.googleapis.com'                     = @('WE*', 'GTS*', 'Google*')
+    'azureopendatastorage.blob.core.windows.net' = @('Microsoft*', 'DigiCert*')
+    'archive.org'                                = @('Go Daddy*', 'GoDaddy*', 'Starfield*')
+    'cdn.modrinth.com'                           = @('Certainly*', 'WE*', 'GTS*')
+}
+
+# The registrable-ish owner of a hostname, used to tell "the same issuer across
+# one company's hosts" (normal) from "across unrelated companies" (not).
+function OwnerOf($hostName) {
+    $parts = $hostName.Split('.')
+    if ($parts.Count -lt 2) { return $hostName }
+    return ($parts[-2] + '.' + $parts[-1])
+}
+
 # Shortens an X.500 issuer to something readable in a table.
 function Short-Issuer($issuer) {
     if (-not $issuer) { return '-' }
@@ -220,7 +266,7 @@ foreach ($t in $targets) {
 
     $row = [ordered]@{
         Group = $t.Group; Host = $t.Host; What = $t.What
-        Dns = '-'; Tls = '-'; Issuer = '-'; Http = '-'
+        Dns = '-'; Tls = '-'; Issuer = '-'; Cert = '-'; CertWhy = ''; Http = '-'
         Needed = $t.Needed; Reached = $false
     }
 
@@ -258,6 +304,38 @@ foreach ($t in $targets) {
         }
     }
 
+    # ---- the SAME handshake again, validating the certificate ----
+    #
+    # The handshake above accepts any certificate on purpose: that is the only
+    # way an interception certificate becomes visible rather than rejected. But
+    # it means "Tls ok" says nothing about whether an ordinary program would
+    # accept the connection, and the launcher's HttpClient validates normally.
+    # This column is what the launcher would see. A host that is 'ok' above and
+    # 'BAD' here is reachable but unusable by anything that checks.
+    if ($row.Tls -eq 'ok') {
+        $tcp2 = $null; $ssl2 = $null
+        try {
+            $tcp2 = New-Object Net.Sockets.TcpClient
+            if (-not $tcp2.ConnectAsync($t.Host, 443).Wait($ConnectTimeoutMs)) {
+                $row.Cert = 'timeout'
+            } else {
+                # No callback at all, so the platform validates against the
+                # Windows trust store exactly as it would for any other client.
+                $ssl2 = New-Object Net.Security.SslStream($tcp2.GetStream(), $false)
+                $ssl2.AuthenticateAsClient($t.Host)
+                $row.Cert = 'ok'
+            }
+        } catch {
+            $row.Cert = 'BAD'
+            $msg = $_.Exception.Message
+            if ($_.Exception.InnerException) { $msg = $_.Exception.InnerException.Message }
+            $row.CertWhy = ($msg -replace "`r?`n", ' ')
+        } finally {
+            if ($ssl2) { $ssl2.Dispose() }
+            if ($tcp2) { $tcp2.Dispose() }
+        }
+    }
+
     # ---- HTTP, where there is a stable thing to ask for ----
     if ($resolved -and $t.Url) {
         try {
@@ -292,9 +370,9 @@ function Show($group, $title) {
     # 'OK' rather than 'Reached', and an explicit Out-String width: at the
     # default console width Format-Table ran out of room and rendered the
     # header as a vertical column of single letters.
-    Say (($rows | Format-Table Host, What, Dns, Tls, Issuer, Http,
+    Say (($rows | Format-Table Host, What, Dns, Tls, Issuer, Cert, Http,
         @{ n='OK'; e = { if ($_.Reached) { 'yes' } else { 'NO' } } } -AutoSize |
-        Out-String -Width 160).TrimEnd())
+        Out-String -Width 200).TrimEnd())
 }
 
 Show 'control'   'CONTROLS (these should pass)'
@@ -509,47 +587,155 @@ $ctrlOk  = @($ctrl | Where-Object { $_.Reached })
 $issuers = @($results | Where-Object { $_.Issuer -ne '-' } | Select-Object -ExpandProperty Issuer -Unique)
 
 # ---- is the network inspecting TLS? ----
-# NOT done by checking issuers against a list of known-good CAs. That was the
-# first attempt and it reported inspection on a machine with none: the public CA
-# population is large and full of short opaque names (WE2, YR1, Certainly, E6),
-# so any hand-written allow-list produces false alarms - and a diagnostic that
-# cries man-in-the-middle when there is none sends you somewhere expensive.
 #
-# The reliable signal needs no list, because it is structural. Unmolested, these
-# hosts sit behind different CDNs and show MANY different issuers. Behind an
-# inspecting proxy every single one is re-signed by that proxy's own CA, so the
-# issuers collapse to one. Count them.
+# The history matters, because this check has now been wrong in both directions.
+#
+# The FIRST attempt compared issuers against a list of known-good CAs and cried
+# man-in-the-middle on a clean machine: the public CA population is large and
+# full of short opaque names (WE1, WE2, YR1, YE1, Certainly), so any hand-written
+# allow-list produces false alarms.
+#
+# It was replaced by a structural count. Unmolested, these hosts sit behind
+# different CDNs and show MANY issuers; behind an inspecting proxy every one is
+# re-signed by the same CA, so the issuers collapse to one. Count them.
+#
+# That is true only of a proxy inspecting EVERYTHING. On 2026-10-16 it reported
+# "No sign of TLS interception: 6 different certificate issuers" on a network
+# running ContentKeeper - which inspects SELECTIVELY. Four of those six issuers
+# were the filter's, re-signing Mojang, GitHub, R2 and archive.org, while S3,
+# Azure, Modrinth, Cloudflare and Maven kept their real ones. The variety the
+# count read as health was the signature of partial inspection.
+#
+# So three signals now, and the second is the one that needs no list:
+#
+#   1  a named product in an issuer -> definitive, and names it
+#   2  hosts presenting an issuer they do NOT normally present, across several
+#      UNRELATED owners -> interception by something on no list
+#   3  every issuer collapsed to one -> the original whole-network case
+#
+# Signal 2 never fires on one host alone. CAs rotate, and a single stale
+# expectation must not be able to accuse a clean network.
+
 $withCert = @($results | Where-Object { $_.Issuer -ne '-' })
 
-# Named vendors, used only to say WHICH product when we already suspect one.
-$inspectors = 'Fortinet', 'FortiGate', 'Zscaler', 'Blue Coat', 'Bluecoat', 'Netskope',
-              'Palo Alto', 'PAN-OS', 'Sophos', 'Untangle', 'Barracuda', 'McAfee', 'Forcepoint',
-              'Websense', 'Umbrella', 'Kaspersky', 'ESET', 'Bitdefender', 'Avast', 'AVG',
-              'NOD32', 'Proxy', 'SSL Inspection', 'Deep Packet', 'Charles', 'Fiddler', 'mitmproxy'
+# Named products. Still useful - it says WHICH - but no longer the only way a
+# filter gets noticed, which is what matters when the next one is not listed.
+$inspectors = 'ContentKeeper', 'Content Keeper', 'Fortinet', 'FortiGate', 'Zscaler',
+              'Blue Coat', 'Bluecoat', 'Netskope', 'Palo Alto', 'PAN-OS', 'Sophos',
+              'Untangle', 'Barracuda', 'McAfee', 'Forcepoint', 'Websense', 'Umbrella',
+              'iboss', 'Lightspeed', 'Securly', 'GoGuardian', 'Smoothwall', 'Cisco',
+              'Kaspersky', 'ESET', 'Bitdefender', 'Avast', 'AVG', 'NOD32',
+              'Proxy', 'SSL Inspection', 'Deep Packet', 'Charles', 'Fiddler', 'mitmproxy'
+
 $named = @($issuers | Where-Object { $i = $_; ($inspectors | Where-Object { $i -like "*$_*" }) })
+
+# Signal 2: per-host baseline comparison.
+$mismatch = @()
+foreach ($r in $withCert) {
+    if (-not $expectedIssuer.ContainsKey($r.Host)) { continue }
+    $fits = $false
+    foreach ($pat in $expectedIssuer[$r.Host]) {
+        if ($r.Issuer -like $pat) { $fits = $true; break }
+    }
+    if (-not $fits) { $mismatch += $r }
+}
+$mismatchOwners = @($mismatch | ForEach-Object { OwnerOf $_.Host } | Select-Object -Unique)
+$partial = ($mismatchOwners.Count -ge 3)
 
 $collapsed = ($withCert.Count -ge 4 -and $issuers.Count -eq 1)
 
-if ($collapsed -or $named.Count -gt 0) {
+# Is the filter's own CA trusted here? If it is, programs accept the re-signed
+# certificates and interception is invisible to them. If it is NOT, every
+# validating client fails while this script's permissive handshake succeeds -
+# which is the shape of "the network is fine but our launcher cannot download".
+function CaInStore($fragment) {
+    foreach ($loc in 'LocalMachine', 'CurrentUser') {
+        try {
+            $st = New-Object Security.Cryptography.X509Certificates.X509Store('Root', $loc)
+            $st.Open('ReadOnly')
+            $hit = @($st.Certificates | Where-Object { $_.Subject -like "*$fragment*" })
+            $st.Close()
+            if ($hit.Count -gt 0) { return $loc }
+        } catch { }
+    }
+    return $null
+}
+
+if ($collapsed -or $named.Count -gt 0 -or $partial) {
     Say ' TLS IS BEING INSPECTED.'
+
     if ($named.Count -gt 0) {
         Say "   The certificates name it: $($named -join ', ')"
-    } else {
+    }
+    elseif ($collapsed) {
         Say "   All $($withCert.Count) hosts presented a certificate from the same"
         Say "   issuer ($($issuers -join ', ')), which cannot happen naturally - they"
         Say '   are behind different CDNs with different CAs.'
     }
-    Say '   Something on this network decrypts HTTPS. Consequences:'
+    else {
+        Say "   Not by name - whatever is doing it is not a product this script"
+        Say "   knows. But $($mismatch.Count) hosts across $($mismatchOwners.Count) unrelated owners are"
+        Say '   presenting a certificate from an issuer they do not normally use:'
+        foreach ($m in $mismatch) {
+            Say ("     {0,-44} {1}" -f $m.Host, $m.Issuer)
+        }
+    }
+
+    # The partition is the operationally useful part: what is inspected tends to
+    # be what is categorised, and what is left alone tends to stay left alone.
+    if ($mismatch.Count -gt 0 -and $mismatch.Count -lt $withCert.Count) {
+        $clean = @($withCert | Where-Object { $mismatch -notcontains $_ })
+        Say ''
+        Say '   It is SELECTIVE, which is worth more than the fact of it:'
+        Say "     inspected   : $(($mismatch | ForEach-Object { $_.Host }) -join ', ')"
+        Say "     left alone  : $(($clean   | ForEach-Object { $_.Host }) -join ', ')"
+        Say '   Anything hosted under the second list is less likely to be'
+        Say '   reclassified than anything under the first.'
+    }
+
+    # Does a normal client accept what the filter presents?
+    $badCert = @($results | Where-Object { $_.Cert -eq 'BAD' })
+    Say ''
+    if ($badCert.Count -gt 0) {
+        Say '   AND ITS CERTIFICATE IS NOT TRUSTED HERE. This is the one that'
+        Say '   explains a program failing while this script succeeds: the'
+        Say '   handshake above accepts any certificate on purpose, and these'
+        Say '   hosts fail when it is actually validated.'
+        foreach ($b in $badCert) {
+            Say ("     {0,-44} {1}" -f $b.Host, $b.CertWhy)
+        }
+        Say '   Fix: the filter CA has to be in the Windows trust store on this'
+        Say '   machine. That is whoever runs the filter, not us.'
+    } else {
+        Say '   Its certificate IS trusted here, so programs accept the'
+        Say '   re-signed connections and this does not by itself stop a'
+        Say '   download. Worth stating, because it rules something out.'
+    }
+
+    if ($named.Count -gt 0) {
+        $where = CaInStore ($named[0])
+        if ($where) { Say "   (its CA is installed in the $where root store)" }
+    }
+
+    Say ''
+    Say '   Consequences either way:'
     Say '     - swapping hostnames to dodge a block will NOT work; the proxy'
     Say '       reads the whole request, not just the name.'
-    Say '     - whoever runs that proxy can allow a host by category or by'
-    Say '       name, which is the only thing that will help.'
+    Say '     - whoever runs it can allow a host by category or by name, which'
+    Say '       is the only thing that will change the answer.'
     Say '     - it also explains large downloads being slow or truncated.'
+    Say '     - and it can be repointed at any time, so a host that works today'
+    Say '       is not a host to build on. The LAN route needs none of this.'
     Say ''
 }
 elseif ($withCert.Count -ge 4) {
-    Say " No sign of TLS interception: $($issuers.Count) different certificate issuers"
-    Say '   across these hosts, which is what an unmolested connection looks like.'
+    Say " No sign of TLS interception: $($issuers.Count) different issuers across"
+    Say '   these hosts, and each is one that host normally presents.'
+    if ($mismatch.Count -gt 0) {
+        Say "   ($($mismatch.Count) host(s) differed from the recorded baseline, which on its own"
+        Say '    means a rotated CA rather than a filter - several unrelated hosts'
+        Say '    have to differ at once before that is worth saying.)'
+    }
     Say ''
 }
 
