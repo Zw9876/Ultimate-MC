@@ -80,3 +80,7 @@ download-hosts-report.txt
 # Support bundles written by Collect-Support.cmd, on whichever machine it is run.
 Ultimate-MC-support-*/
 Ultimate-MC-support-*.zip
+
+# Assembled by tools\Build-WorkstationKit.ps1 for a USB trip. Copies, rebuilt on
+# demand; the originals are at the root and in tools\.
+Workstation-Kit/
