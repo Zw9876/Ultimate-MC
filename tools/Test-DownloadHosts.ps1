@@ -53,7 +53,14 @@ param(
 
     # Skip the "press Enter" at the end. Set automatically when the output is
     # being redirected, since nothing is waiting to read the window then.
-    [switch]$NoPause
+    [switch]$NoPause,
+
+    # How far to stream the client jar in the large-transfer test. Enough to see
+    # a stall; not so much that a slow line makes the whole run unpleasant.
+    [int]$BigMB = 12,
+
+    # Skip the large-transfer test. It is the slowest part by far.
+    [switch]$SkipBig
 )
 
 $ErrorActionPreference = 'Continue'
@@ -105,6 +112,12 @@ function ScriptFingerprint {
         }
     } catch { }
     return 'unknown (not run from a file)'
+}
+
+# A pass/fail line for the checks in the large-transfer section. Named Check2 so
+# it cannot collide with the Check used by the Verify-* scripts.
+function Check2($what, $ok) {
+    if ($ok) { Say "    ok    $what" } else { Say "    FAIL  $what" }
 }
 
 function SaveReport {
@@ -577,6 +590,179 @@ if ($lanVia -ne 'direct' -and $lanVia -notlike 'error*') {
     Say '   check-ins, self-update, play blocks and the skin server all talk to'
     Say '   the host on the LAN, and routing those through a proxy would break'
     Say '   every one of them. Any fix has to bypass local addresses.'
+}
+
+# ===========================================================================
+# LARGE TRANSFERS.
+#
+# This section exists because of a hole in everything above it: every HTTP check
+# in this script is a ONE KILOBYTE range request. So the tables prove that small
+# requests work, and say nothing whatever about a 25 MB client jar or several
+# thousand asset files.
+#
+# That distinction is the whole game on a network that INSPECTS traffic rather
+# than blocking it. A proxy that buffers and scans a large download is exactly
+# the thing that answers a 1 KB probe with 200 and then stalls, truncates or
+# times out the real one - and from the launcher that looks identical to being
+# blocked, while this script cheerfully reports everything reachable.
+#
+# So this does what the launcher does, rather than something shaped like it:
+#
+#   1  read the version manifest, as MojangManifest.cs does
+#   2  take the latest release and read its version JSON, as VersionInstaller does
+#   3  download a real library jar IN FULL and verify its SHA-1 against the
+#      manifest - this is the decisive one, because a truncated or altered
+#      transfer fails a hash and a short read does not
+#   4  stream the client jar for a few MB and report the throughput, which is
+#      what shows up as "the download sits there doing nothing"
+# ===========================================================================
+
+if (-not $SkipBig) {
+    Say ''
+    Say '---- LARGE TRANSFERS (what the 1 KB checks above cannot tell you) ----'
+
+    function FetchJson($url, $timeoutMs = 20000) {
+        $req = [Net.HttpWebRequest]::Create($url)
+        $req.Timeout = $timeoutMs
+        $req.ReadWriteTimeout = $timeoutMs
+        $req.UserAgent = 'MinecraftPortableLauncher connectivity check'
+        $resp = $req.GetResponse()
+        try {
+            $reader = New-Object IO.StreamReader($resp.GetResponseStream())
+            try { return $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+        } finally { $resp.Close() }
+    }
+
+    # Returns bytes read, seconds, and the SHA-1 of what arrived.
+    function Pull($url, $maxBytes, $overallSeconds) {
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $sha = [Security.Cryptography.SHA1]::Create()
+        $total = 0L
+        $stalled = $false
+
+        $req = [Net.HttpWebRequest]::Create($url)
+        $req.Timeout = 30000
+        $req.ReadWriteTimeout = 30000
+        $req.UserAgent = 'MinecraftPortableLauncher connectivity check'
+
+        $resp = $req.GetResponse()
+        try {
+            $stream = $resp.GetResponseStream()
+            $buf = New-Object byte[] 65536
+            while ($true) {
+                $n = $stream.Read($buf, 0, $buf.Length)
+                if ($n -le 0) { break }
+                $null = $sha.TransformBlock($buf, 0, $n, $null, 0)
+                $total += $n
+                if ($maxBytes -gt 0 -and $total -ge $maxBytes) { break }
+                if ($sw.Elapsed.TotalSeconds -gt $overallSeconds) { $stalled = $true; break }
+            }
+            $stream.Dispose()
+        } finally { $resp.Close() }
+
+        $null = $sha.TransformFinalBlock((New-Object byte[] 0), 0, 0)
+        $hex = ($sha.Hash | ForEach-Object { $_.ToString('x2') }) -join ''
+        $sha.Dispose()
+        $sw.Stop()
+
+        return [pscustomobject]@{
+            Bytes = $total; Seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+            Sha1 = $hex; Stalled = $stalled
+        }
+    }
+
+    $bigOk = $null       # $true / $false / $null when it could not be attempted
+    $bigWhy = ''
+
+    try {
+        Say '  reading the version manifest...'
+        $manifest = FetchJson 'https://launchermeta.mojang.com/mc/game/version_manifest_v2.json'
+        $latest = $manifest.latest.release
+        $entry = @($manifest.versions | Where-Object { $_.id -eq $latest })[0]
+        Say "  latest release: $latest"
+
+        Say '  reading its version JSON...'
+        $vj = FetchJson $entry.url
+
+        # A real library, big enough for a proxy to care about and small enough
+        # not to punish a slow line. Largest under 15 MB that has a hash.
+        $libs = @($vj.libraries |
+                  Where-Object { $_.downloads -and $_.downloads.artifact -and
+                                 $_.downloads.artifact.sha1 -and
+                                 $_.downloads.artifact.size -lt 15MB } |
+                  Sort-Object { $_.downloads.artifact.size } -Descending)
+
+        if ($libs.Count -eq 0) {
+            $bigWhy = 'no suitable library found in the version JSON'
+        } else {
+            $art = $libs[0].downloads.artifact
+            $mb = [math]::Round($art.size / 1MB, 1)
+            Say "  downloading a real library IN FULL and checking its hash ($mb MB)..."
+            Say "    $($art.url)"
+
+            $got = Pull $art.url 0 180
+            $match = ($got.Sha1 -eq $art.sha1)
+            $rate = if ($got.Seconds -gt 0) { [math]::Round(($got.Bytes / 1MB) / $got.Seconds, 2) } else { 0 }
+
+            Say ''
+            Say "    expected : $($art.size) bytes, sha1 $($art.sha1)"
+            Say "    received : $($got.Bytes) bytes, sha1 $($got.Sha1)"
+            Say "    took     : $($got.Seconds)s  (about $rate MB/s)"
+
+            Check2 'the whole file arrived' ($got.Bytes -eq $art.size)
+            Check2 'and its SHA-1 matches the manifest' $match
+
+            $bigOk = (($got.Bytes -eq $art.size) -and $match -and -not $got.Stalled)
+            if ($got.Stalled) { $bigWhy = 'it stopped making progress and hit the time limit' }
+            elseif ($got.Bytes -ne $art.size) { $bigWhy = 'it was truncated' }
+            elseif (-not $match) { $bigWhy = 'the bytes that arrived are not the bytes Mojang published' }
+        }
+
+        # And the client jar, part-way, purely for throughput on a big object.
+        if ($vj.downloads -and $vj.downloads.client) {
+            $cap = $BigMB * 1MB
+            $jarMb = [math]::Round($vj.downloads.client.size / 1MB, 1)
+            Say ''
+            Say "  streaming the client jar ($jarMb MB total) for up to $BigMB MB..."
+            $jar = Pull $vj.downloads.client.url $cap 120
+            $jrate = if ($jar.Seconds -gt 0) { [math]::Round(($jar.Bytes / 1MB) / $jar.Seconds, 2) } else { 0 }
+            Say "    read $([math]::Round($jar.Bytes / 1MB, 1)) MB in $($jar.Seconds)s (about $jrate MB/s)"
+            if ($jar.Stalled) {
+                Say '    STALLED - it stopped making progress before the cap.'
+                $bigOk = $false
+                if (-not $bigWhy) { $bigWhy = 'the client jar stopped making progress' }
+            }
+        }
+    }
+    catch {
+        $bigOk = $false
+        $bigWhy = $_.Exception.Message -replace "`r?`n", ' '
+        Say "    FAILED: $bigWhy"
+    }
+
+    Say ''
+    Say ' LARGE TRANSFER VERDICT'
+    if ($bigOk -eq $true) {
+        Say '   Large downloads work from here, intact and hash-verified. So the'
+        Say '   Setup tab failing is NOT the network scanning big transfers, and'
+        Say '   it is not a blocked host either - both are now ruled out.'
+        Say '   What is left is the launcher itself: read launcher_errors.txt.'
+    }
+    elseif ($bigOk -eq $false) {
+        Say "   THIS IS THE PROBLEM: $bigWhy"
+        Say '   Small requests succeed and a real download does not, which is what'
+        Say '   an inspecting proxy does to anything large. Note what it means:'
+        Say '     - nothing is "blocked", so an allow-list request will be met'
+        Say '       with "that site is already permitted"; the thing to ask for'
+        Say '       is an exemption from SCANNING, by host.'
+        Say '     - resuming a part-finished download helps, because each attempt'
+        Say '       then has less to get through before being cut.'
+        Say '     - and the host-over-LAN route avoids it completely.'
+    }
+    else {
+        Say "   Could not be attempted: $bigWhy"
+    }
+    Say ''
 }
 
 Say ''

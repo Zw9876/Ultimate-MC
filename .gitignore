@@ -76,3 +76,7 @@ download-hosts-report.txt
 # disposable and deliberately untracked. If the two ever drift, the SHA-256 in
 # a report's provenance stamp says which of them produced that report.
 /Test-DownloadHosts.ps1
+
+# Support bundles written by Collect-Support.cmd, on whichever machine it is run.
+Ultimate-MC-support-*/
+Ultimate-MC-support-*.zip
