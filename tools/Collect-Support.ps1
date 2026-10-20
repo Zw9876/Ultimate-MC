@@ -106,6 +106,15 @@ function Say($text = '') {
 # Printed to the screen only. Keeps the progress chatter out of the report.
 function Step($text) { Write-Output "  $text" }
 
+# First 16 characters of a timestamp, or a placeholder. Exists so the fleet rows
+# below need no conditional inside a format string.
+function Short16($value, $whenEmpty) {
+    $s = '' + $value
+    if ([string]::IsNullOrWhiteSpace($s)) { return $whenEmpty }
+    if ($s.Length -gt 16) { return $s.Substring(0, 16) }
+    return $s
+}
+
 function Safe($block, $label) {
     try { & $block } catch { Say "  (could not read $label - $($_.Exception.Message))" }
 }
@@ -218,9 +227,19 @@ Safe {
         $ms = @($fleet.machines)
         Say "---- FLEET ROSTER ON THIS MACHINE ($($ms.Count) machines) ----"
         Say '  (its presence means this machine has been serving as the host)'
-        foreach ($m in $ms) {
-            Say ("  {0,-20} launcher {1,-14} seen {2}  as {3}" -f `
-                 $m.name, $m.launcher, $m.seen, $m.username)
+        # $m.machine, not $m.name. The field is called machine, so every row
+        # printed a blank where the computer name should have been and the
+        # roster in the report was unusable - the raw fleet.json in the bundle
+        # is the only reason it was recoverable.
+        # Everything worked out BEFORE the format string. A parenthesised if
+        # inside a -f argument list parses perfectly and then fails at run time
+        # with "The term 'if' is not recognized", because if is a statement -
+        # caught by running this, not by parsing it.
+        foreach ($m in ($ms | Sort-Object { $_.seen } -Descending)) {
+            $seen = Short16 $m.seen 'never'
+            $played = Short16 $m.played 'NEVER'
+            Say ("  {0,-20} {1,-12} launcher {2,-13} seen {3,-16} played {4,-16} as {5}" -f `
+                 $m.machine, $m.address, $m.launcher, $seen, $played, $m.username)
         }
         Say ''
     }

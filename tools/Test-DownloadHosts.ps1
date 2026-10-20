@@ -621,16 +621,34 @@ if (-not $SkipBig) {
     Say ''
     Say '---- LARGE TRANSFERS (what the 1 KB checks above cannot tell you) ----'
 
+    # Keeps whatever arrived when it turns out not to be JSON, because that body
+    # is the entire diagnosis. A content filter commonly answers 200 with its own
+    # page, and the status code alone cannot tell you so - which is exactly how
+    # five Mojang hosts were read as reachable on 2026-10-16 when the manifest
+    # was never actually served.
+    $script:badBody = $null
+    $script:badUrl = $null
+
     function FetchJson($url, $timeoutMs = 20000) {
         $req = [Net.HttpWebRequest]::Create($url)
         $req.Timeout = $timeoutMs
         $req.ReadWriteTimeout = $timeoutMs
         $req.UserAgent = 'MinecraftPortableLauncher connectivity check'
         $resp = $req.GetResponse()
+
+        $text = $null
         try {
             $reader = New-Object IO.StreamReader($resp.GetResponseStream())
-            try { return $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+            try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
         } finally { $resp.Close() }
+
+        try {
+            return $text | ConvertFrom-Json
+        } catch {
+            $script:badBody = $text
+            $script:badUrl = $url
+            throw
+        }
     }
 
     # Returns bytes read, seconds, and the SHA-1 of what arrived.
@@ -738,6 +756,33 @@ if (-not $SkipBig) {
         $bigOk = $false
         $bigWhy = $_.Exception.Message -replace "`r?`n", ' '
         Say "    FAILED: $bigWhy"
+
+        # If something arrived and was not JSON, show it. This is the difference
+        # between "the download was cut short" and "we were never talking to
+        # Mojang at all", and those need opposite things asked for.
+        if ($script:badBody -ne $null) {
+            $body = $script:badBody
+            Say ''
+            Say "    WHAT ACTUALLY CAME BACK from $script:badUrl"
+            Say "    ($($body.Length) characters, and not JSON):"
+            Say ''
+            $show = if ($body.Length -gt 600) { $body.Substring(0, 600) + ' ...' } else { $body }
+            foreach ($line in ($show -split "`r?`n")) { Say "      $line" }
+
+            $bodyFile = Join-Path (Split-Path -Parent $Out) 'download-hosts-blockpage.txt'
+            try {
+                Set-Content -LiteralPath $bodyFile -Value $body -Encoding UTF8 -ErrorAction Stop
+                Say ''
+                Say "    The whole thing is saved to $bodyFile - send that too."
+            } catch { }
+
+            $looksLikePage = ($body -match '(?i)<html|<!doctype|contentkeeper|blocked|denied|not permitted|policy')
+            $bigWhy = if ($looksLikePage) {
+                'something answered INSTEAD of Mojang - a filter page, not the manifest'
+            } else {
+                "the manifest was not JSON ($($body.Length) chars)"
+            }
+        }
     }
 
     Say ''
@@ -750,14 +795,40 @@ if (-not $SkipBig) {
     }
     elseif ($bigOk -eq $false) {
         Say "   THIS IS THE PROBLEM: $bigWhy"
-        Say '   Small requests succeed and a real download does not, which is what'
-        Say '   an inspecting proxy does to anything large. Note what it means:'
-        Say '     - nothing is "blocked", so an allow-list request will be met'
-        Say '       with "that site is already permitted"; the thing to ask for'
-        Say '       is an exemption from SCANNING, by host.'
-        Say '     - resuming a part-finished download helps, because each attempt'
-        Say '       then has less to get through before being cut.'
-        Say '     - and the host-over-LAN route avoids it completely.'
+        Say ''
+
+        if ($script:badBody -ne $null) {
+            # Not a size problem at all. Nothing was downloaded because nothing
+            # Mojang sent ever arrived.
+            Say '   This is NOT about large transfers. The very first request - the'
+            Say '   version manifest, a small piece of JSON - was answered with'
+            Say '   something that is not JSON. So the launcher is not being cut off'
+            Say '   part-way through a download; it is being handed a different'
+            Say '   document and failing to parse it.'
+            Say ''
+            Say '   Which also means the HTTP 200s in the tables above are worthless'
+            Say '   here: a filter answers 200 with its own page. This script says so'
+            Say '   in its own header and it still fooled the reader.'
+            Say ''
+            Say '   So the ask IS an allow-list after all, by host, for:'
+            Say '     launchermeta.mojang.com   piston-meta.mojang.com'
+            Say '     piston-data.mojang.com    libraries.minecraft.net'
+            Say '     resources.download.minecraft.net'
+            Say '   Not an exemption from scanning - the request is not reaching'
+            Say '   Mojang to be scanned.'
+            Say ''
+            Say '   Until then, Minecraft content has to come from the host over the'
+            Say '   LAN, which no filter on this machine touches.'
+        } else {
+            Say '   Small requests succeed and a real download does not, which is what'
+            Say '   an inspecting proxy does to anything large. Note what it means:'
+            Say '     - nothing is "blocked", so an allow-list request will be met'
+            Say '       with "that site is already permitted"; the thing to ask for'
+            Say '       is an exemption from SCANNING, by host.'
+            Say '     - resuming a part-finished download helps, because each attempt'
+            Say '       then has less to get through before being cut.'
+            Say '     - and the host-over-LAN route avoids it completely.'
+        }
     }
     else {
         Say "   Could not be attempted: $bigWhy"
