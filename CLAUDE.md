@@ -11,7 +11,7 @@ The C# launcher (`MinecraftLauncher/`, .NET 10 WPF) is **complete and shipping**
 The whole PowerShell feature set is ported plus a good deal more;
 `MinecraftLauncher-Standalone.ps1` is now only a behavioural reference.
 
-**Current build: 1.2.287.184** (2026-10-14), at the repo root and in the rollout zip
+**Current build: 1.2.292.1216** (2026-10-20), at the repo root and in the rollout zip
 (56.3 MB, launcher verified byte-for-byte inside it). Build both zips with
 `tools\Build-RolloutZip.ps1` rather than by hand — it refuses to write an update zip
 containing anything host-only. Updates are mandatory and self-installing, so in
@@ -66,6 +66,18 @@ Two have now met reality, and both taught something:
   which returns **nothing** rather than falling back to a peer). `PlayBlocks.
   ControlFloor` is now the floor that governs, because understanding a pause is
   useless while the question goes elsewhere — the FLEET panel warns from it.
+
+  *2026-10-20* — **and it still reached only some of them, with the fleet
+  measured as current.** 19 of 20 machines on 1.2.287.184, discovery working,
+  all 20 checked in, and the clients that obeyed had the correct pause id
+  cached. One mechanism remains and it is by design: `PauseOnThisMachine`
+  returns null when `admin.flag` is present, so **any machine with a stray copy
+  of that file is exempt from every pause and block** — and on a fleet
+  distributed by copying the launcher folder, that is one careless copy away.
+  It was invisible from the host, which is what made it expensive. Clients now
+  report whether they hold it and the FLEET panel shows an `admin.flag` column
+  plus a warning naming any machine that does. **Not yet confirmed as the
+  cause** — it needs a bundle from a machine that kept playing.
 - **The Fabric loader policy is switched on here and really upgraded this host's
   server**, 0.19.3 to 0.19.5, proved by starting it: *"Loading Minecraft 26.1.2
   with Fabric Loader 0.19.5 … Done (1.288s)"*. Not yet proven on anyone else's

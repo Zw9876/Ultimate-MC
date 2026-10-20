@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using MinecraftLauncher.Core;
@@ -29,6 +29,7 @@ namespace MinecraftLauncher.Tests
                 using var scope = LocalInstall.RedirectBase(sandbox);
 
                 Reporting();
+            Exemption();
                 Merging();
                 Counting();
                 Storing();
@@ -45,11 +46,12 @@ namespace MinecraftLauncher.Tests
 
         private static FleetRoster.CheckIn Report(
             string machine, string? user = null, string? launcher = null,
-            string? mc = null, string? loader = null, bool playing = false) =>
+            string? mc = null, string? loader = null, bool playing = false,
+            bool? admin = null) =>
             new()
             {
                 Machine = machine, Username = user, Launcher = launcher,
-                Minecraft = mc, Loader = loader, Playing = playing
+                Minecraft = mc, Loader = loader, Playing = playing, Admin = admin
             };
 
         private static void Reporting()
@@ -79,9 +81,114 @@ namespace MinecraftLauncher.Tests
             Expect("with the username", back!.Username, "Zach");
             Check("and the playing flag", back.Playing);
 
+            // The admin flag is a protocol change, so it has to survive the wire -
+            // a field that is set locally and lost in transit would show every
+            // machine as "did not say" and look exactly like nothing being reported.
+            Check("admin.flag state is reported", report.Admin.HasValue);
+            var backAdmin = FleetRoster.ParseCheckIn(FleetRoster.ToJson(
+                Report("M", admin: true)));
+            Check("and survives the round trip as true", backAdmin!.Admin == true);
+            var backNo = FleetRoster.ParseCheckIn(FleetRoster.ToJson(
+                Report("M", admin: false)));
+            Check("and as false", backNo!.Admin == false);
+
+            // An older launcher sends no such field at all. That must read as
+            // "did not say", never as "no".
+            var old = FleetRoster.ParseCheckIn("""{"machine":"OLD-PC","launcher":"1.2.280.291"}""");
+            Check("a launcher that never heard of the field says nothing, not no",
+                  old is not null && old.Admin is null);
+
             Check("rubbish is not a check-in", FleetRoster.ParseCheckIn("{ not json") is null);
             Check("neither is a report with no machine",
                   FleetRoster.ParseCheckIn("""{"username":"Zach"}""") is null);
+        }
+
+        /// <summary>
+        /// Who is exempt from a pause, and whether the host can see it.
+        /// </summary>
+        /// <remarks>
+        /// This exists because of 2026-10-20: pausing everyone reached some machines
+        /// and not others, with the whole fleet on the fixed build, discovery working
+        /// and the pause correctly cached on the clients that did obey. The one
+        /// remaining mechanism is that a machine holding admin.flag is exempt BY
+        /// DESIGN - PlayBlocks.PauseOnThisMachine returns null for it - and on a fleet
+        /// distributed by copying the launcher folder, one stray copy of that file is
+        /// enough. It was invisible from the host, which is the part that made it cost
+        /// an evening rather than a minute.
+        /// </remarks>
+        private static void Exemption()
+        {
+            Section("who is exempt from a pause, and can the host see it");
+
+            var listing = new FleetRoster.Listing();
+            var now = new DateTime(2026, 10, 20, 12, 0, 0, DateTimeKind.Utc);
+
+            FleetRoster.Merge(listing, Report("CLIENT-A", "Juicy", "1.2.287.184", admin: false), null, now);
+            FleetRoster.Merge(listing, Report("CLIENT-B", "Chunk", "1.2.287.184", admin: true), null, now);
+            FleetRoster.Merge(listing, Report("CLIENT-C", "Thumb", "1.2.280.291"), null, now);
+
+            var a = listing.Machines.Single(m => m.Name == "CLIENT-A");
+            var b = listing.Machines.Single(m => m.Name == "CLIENT-B");
+            var c = listing.Machines.Single(m => m.Name == "CLIENT-C");
+
+            Check("a machine that says no is not exempt", !a.IsExempt);
+            Check("a machine that says yes IS exempt", b.IsExempt);
+            Check("a machine that did not say is not treated as exempt", !c.IsExempt);
+            Expect("and reads as unknown rather than guessed", c.AdminText, "?");
+            Expect("the exempt one reads as a problem", b.AdminText, "EXEMPT");
+            Expect("the ordinary one reads plainly", a.AdminText, "no");
+
+            // Merge must not let an old launcher erase what a new one established:
+            // a machine updates, reports admin, then an older copy checks in.
+            FleetRoster.Merge(listing, Report("CLIENT-B", "Chunk", "1.2.280.291"), null, now);
+            Check("a report carrying no admin field leaves the known answer alone",
+                  listing.Machines.Single(m => m.Name == "CLIENT-B").IsExempt);
+
+            // ...but a genuine "no" must still clear it, or deleting the file could
+            // never be confirmed from here.
+            FleetRoster.Merge(listing, Report("CLIENT-B", "Chunk", "1.2.287.184", admin: false), null, now);
+            Check("deleting the file and checking in again clears it",
+                  !listing.Machines.Single(m => m.Name == "CLIENT-B").IsExempt);
+
+            // ---- the warning ----
+            var clean = new FleetRoster.Listing();
+            FleetRoster.Merge(clean, Report("CLIENT-A", "Juicy", "1.2.287.184", admin: false), null, now);
+            Check("nothing to say when no machine holds it and all have reported",
+                  FleetRoster.ExemptWarning(clean) is null);
+
+            var silent = new FleetRoster.Listing();
+            FleetRoster.Merge(silent, Report("CLIENT-C", "Thumb", "1.2.280.291"), null, now);
+            string? silentWarn = FleetRoster.ExemptWarning(silent);
+            Check("a machine that has not reported is mentioned as unknown",
+                  silentWarn is not null && silentWarn.Contains("not reported"), silentWarn);
+
+            var bad = new FleetRoster.Listing();
+            FleetRoster.Merge(bad, Report("CLIENT-B", "Chunk", "1.2.287.184", admin: true), null, now);
+            string? badWarn = FleetRoster.ExemptWarning(bad);
+            Check("a machine holding it is named", badWarn is not null && badWarn.Contains("CLIENT-B"), badWarn);
+            Check("with the player, so it can be found in the room",
+                  badWarn!.Contains("Chunk"), badWarn);
+            Check("and says it cannot be paused", badWarn.Contains("EXEMPT"), badWarn);
+            Check("and says what to do about it", badWarn.Contains("Delete"), badWarn);
+
+            // THE HOST ITSELF. It is meant to hold the file - that is what unlocks the
+            // tab this list is displayed on - so it must never appear in its own
+            // warning, or the warning is permanent and therefore ignored.
+            var hostOnly = new FleetRoster.Listing();
+            FleetRoster.Merge(hostOnly, Report(FleetRoster.ThisMachine, "Zach", "1.2.287.184", admin: true),
+                              null, now);
+            Check("this machine holding it is expected and not warned about",
+                  FleetRoster.ExemptElsewhere(hostOnly).Count == 0);
+            Check("so there is no warning at all for a host on its own",
+                  FleetRoster.ExemptWarning(hostOnly) is null);
+
+            // And with both, only the other one is named.
+            var mixed = new FleetRoster.Listing();
+            FleetRoster.Merge(mixed, Report(FleetRoster.ThisMachine, "Zach", "1.2.287.184", admin: true), null, now);
+            FleetRoster.Merge(mixed, Report("CLIENT-B", "Chunk", "1.2.287.184", admin: true), null, now);
+            var others = FleetRoster.ExemptElsewhere(mixed);
+            Check("with the host and a client both holding it, only the client is named",
+                  others.Count == 1 && others[0].Name == "CLIENT-B");
         }
 
         private static void Merging()

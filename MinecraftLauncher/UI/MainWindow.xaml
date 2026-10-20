@@ -1064,6 +1064,13 @@
                                                             DisplayMemberBinding="{Binding SeenText}"/>
                                             <GridViewColumn Header="Address" Width="115"
                                                             DisplayMemberBinding="{Binding Address}"/>
+                                            <!--
+                                                A machine holding admin.flag is exempt from
+                                                every pause and block by design, and that was
+                                                invisible here until it was asked for.
+                                            -->
+                                            <GridViewColumn Header="admin.flag" Width="90"
+                                                            DisplayMemberBinding="{Binding AdminText}"/>
                                             <GridViewColumn Header="Playing" Width="140"
                                                             DisplayMemberBinding="{Binding BlockText}"/>
                                         </GridView>

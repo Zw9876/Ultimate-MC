@@ -1163,6 +1163,16 @@ namespace MinecraftLauncher.UI
 
             if (cannot is not null) FleetNote.Text = cannot + "  " + FleetNote.Text;
 
+            // Prepended LAST so it reads FIRST, because it outranks everything else
+            // here: a machine holding admin.flag cannot be paused or blocked at all,
+            // and whoever sits at it can pause everybody else.
+            //
+            // The full roster rather than tonight's scope, deliberately. This is a
+            // standing problem whether or not that machine has been switched on today,
+            // and the fix is to go and delete a file on it.
+            string? exempt = FleetRoster.ExemptWarning(listing);
+            if (exempt is not null) FleetNote.Text = exempt + "  " + FleetNote.Text;
+
             FleetForgetButton.IsEnabled = listing.Machines.Count > 0;
         }
 

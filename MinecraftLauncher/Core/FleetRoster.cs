@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -76,6 +76,23 @@ namespace MinecraftLauncher.Core
             /// opposed to just opening the launcher.
             /// </summary>
             [JsonPropertyName("playing")] public bool Playing { get; set; }
+
+            /// <summary>
+            /// Whether <c>admin.flag</c> sits beside this machine's launcher.
+            /// </summary>
+            /// <remarks>
+            /// Reported because a machine holding that file is EXEMPT from every pause
+            /// and block by design - <see cref="PlayBlocks.PauseOnThisMachine"/> returns
+            /// null for it - and until now there was no way for the host to know. On a
+            /// fleet distributed by copying the launcher folder, one stray copy of the
+            /// file makes a machine quietly unpausable and unblockable, and also unlocks
+            /// the Admin tab on it.
+            ///
+            /// Nullable on purpose: null means "did not say", which is what a launcher
+            /// older than this field reports, and that is a different thing from a
+            /// machine that said no.
+            /// </remarks>
+            [JsonPropertyName("admin")] public bool? Admin { get; set; }
         }
 
         // ── What the host keeps ──────────────────────────────────────
@@ -96,6 +113,17 @@ namespace MinecraftLauncher.Core
             /// <summary>Last time they actually started a game, UTC. Null if never.</summary>
             [JsonPropertyName("played")] public DateTime? Played { get; set; }
 
+            /// <summary><inheritdoc cref="CheckIn.Admin"/></summary>
+            [JsonPropertyName("admin")] public bool? Admin { get; set; }
+
+            /// <summary>
+            /// True only when the machine actually said it holds admin.flag. A machine
+            /// that has not said is not treated as exempt, because guessing either way
+            /// would be worse than showing it as unknown.
+            /// </summary>
+            [JsonIgnore]
+            public bool IsExempt => Admin == true;
+
             [JsonIgnore]
             public Version Version =>
                 System.Version.TryParse(Launcher, out var v) ? v : new Version(0, 0, 0, 0);
@@ -110,6 +138,15 @@ namespace MinecraftLauncher.Core
             [JsonIgnore]
             public string LauncherText =>
                 string.IsNullOrWhiteSpace(Launcher) ? "unknown" : Launcher!;
+
+            /// <summary>The admin.flag column, worded so the bad case reads as bad.</summary>
+            [JsonIgnore]
+            public string AdminText => Admin switch
+            {
+                true  => "EXEMPT",
+                false => "no",
+                _     => "?"
+            };
 
             [JsonIgnore]
             public string PlayingText => string.IsNullOrWhiteSpace(Minecraft)
@@ -188,6 +225,10 @@ namespace MinecraftLauncher.Core
             if (!string.IsNullOrWhiteSpace(report.Minecraft)) machine.Minecraft = report.Minecraft!.Trim();
             if (!string.IsNullOrWhiteSpace(report.Loader))    machine.Loader    = report.Loader!.Trim();
             if (!string.IsNullOrWhiteSpace(address))          machine.Address   = address;
+
+            // Only when the report carries it, like every field above: a launcher too
+            // old to send it must not be able to clear what a newer one established.
+            if (report.Admin.HasValue) machine.Admin = report.Admin;
 
             machine.Seen = nowUtc;
             if (report.Playing) machine.Played = nowUtc;
@@ -285,6 +326,57 @@ namespace MinecraftLauncher.Core
         public static int Behind(Listing listing, Version hostVersion) =>
             listing.Machines.Count(m => m.Version > new Version(0, 0, 0, 0) &&
                                         m.Version < hostVersion);
+
+        /// <summary>
+        /// Machines that reported holding <c>admin.flag</c>, other than this one.
+        /// </summary>
+        /// <remarks>
+        /// This machine is excluded because the host is MEANT to hold it - that is what
+        /// unlocks the tab this list is shown on. Anywhere else it is a problem: that
+        /// machine cannot be paused or blocked, and whoever uses it can pause everybody
+        /// else.
+        /// </remarks>
+        public static List<Machine> ExemptElsewhere(Listing listing) =>
+            listing.Machines
+                   .Where(m => m.IsExempt &&
+                               !string.Equals(m.Name, ThisMachine, StringComparison.OrdinalIgnoreCase))
+                   .ToList();
+
+        /// <summary>
+        /// What to say above the list about admin.flag, or null when there is nothing
+        /// worth saying.
+        /// </summary>
+        public static string? ExemptWarning(Listing listing)
+        {
+            var others = ExemptElsewhere(listing);
+            int silent = listing.Machines.Count(m => m.Admin is null);
+
+            if (others.Count == 0 && silent == 0) return null;
+
+            var parts = new List<string>();
+
+            if (others.Count > 0)
+            {
+                var names = others.Select(m =>
+                    string.IsNullOrWhiteSpace(m.Username) ? m.Name : $"{m.Name} ({m.Username})");
+
+                parts.Add(
+                    $"{others.Count} machine{(others.Count == 1 ? " has" : "s have")} admin.flag beside " +
+                    $"the launcher and {(others.Count == 1 ? "is" : "are")} therefore EXEMPT from every " +
+                    $"pause and block, and can pause everyone else: {string.Join(", ", names)}. " +
+                    "Delete that file there.");
+            }
+
+            if (silent > 0)
+            {
+                parts.Add(
+                    $"{silent} {(silent == 1 ? "machine has" : "machines have")} not reported whether " +
+                    "they hold it, which means a launcher from before this was recorded - they will " +
+                    "say once they check in again.");
+            }
+
+            return string.Join("  ", parts);
+        }
 
         /// <summary>
         /// A one-line answer to "is the fleet current?", which is the question this
@@ -407,7 +499,8 @@ namespace MinecraftLauncher.Core
                 Launcher  = LauncherPackage.CurrentVersion.ToString(),
                 Minecraft = string.IsNullOrWhiteSpace(minecraft) ? null : minecraft,
                 Loader    = string.IsNullOrWhiteSpace(loader) ? null : loader,
-                Playing   = playing
+                Playing   = playing,
+                Admin     = RequiredMods.AdminEnabled
             };
 
         public static string ToJson(CheckIn report) => JsonSerializer.Serialize(report, Options);

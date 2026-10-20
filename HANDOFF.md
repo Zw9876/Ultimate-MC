@@ -1394,6 +1394,80 @@ WPF code-behind thin.
 ---
 ## 11. Notable gotchas learned the hard way (so they aren't rediscovered)
 
+### HTTP 200 is not reachability, and this script says so in its own header
+
+The host probe reported all five Mojang hosts as `Http 200`, twice, and both
+times it was read as "Mojang is reachable". It is not. The large-transfer test,
+added precisely because every other check was a 1 KB range request, failed on
+its very first call:
+
+```
+reading the version manifest...
+FAILED: Invalid JSON primitive: .
+```
+
+A small piece of JSON, answered with something that is not JSON. So nothing was
+being truncated part-way through a big download — the launcher was being handed a
+different document and failing to parse it. Those 200s were **ContentKeeper's own
+page**.
+
+`Test-DownloadHosts.ps1` has said this since it was written:
+
+> a content filter commonly answers 200 or 403 with its own block page, so the
+> number alone proves little
+
+and the number was still treated as proof, on 2026-10-16 and again on 2026-10-19,
+in the face of the script's own warning. The fix is not another caveat in a
+comment: `FetchJson` now **keeps the body** when it will not parse, prints the
+first 600 characters, saves the whole thing to `download-hosts-blockpage.txt`,
+and names the URL. Evidence, not an inference from a status code.
+
+The verdict also splits, because the two causes want opposite requests. A
+truncated transfer wants an exemption from **scanning**. A non-JSON answer to the
+first small request wants an **allow-list**, by host, because the request never
+reached Mojang to be scanned at all. The old text asserted the first regardless,
+and would have sent a correct-sounding request to the wrong department.
+
+### A machine holding admin.flag cannot be paused, and nobody could see it
+
+Pausing everyone reached some machines and not others on 2026-10-20, with
+everything measurable healthy: 19 of 20 on the current build, all 20 checked in,
+discovery working, and the clients that obeyed holding the right pause id in
+their cache. The remaining mechanism is three lines and entirely deliberate:
+
+```csharp
+public static Pause? PauseOnThisMachine(Listing listing, DateTime nowUtc)
+{
+    if (RequiredMods.AdminEnabled) return null;
+    return PauseInForce(listing, nowUtc);
+}
+```
+
+Correct for the host, which must not pause itself. But the fleet is distributed
+**by copying the launcher folder**, so one copy taken from a folder containing
+`admin.flag` produces a machine that is silently unpausable, unblockable, and has
+the Admin tab unlocked — able to pause everybody else.
+
+The feature was fine. The hole was that it could not be observed: nothing in the
+roster, the panel or the logs said which machines were exempt. So clients now
+report it in their check-in and FLEET shows an `admin.flag` column (`no`,
+`EXEMPT`, `?`) with a warning naming any machine that holds one.
+
+Three details worth keeping:
+
+- **The field is nullable.** `null` means "did not say", which is what a launcher
+  older than the field reports, and that is not the same as "no". Treating silence
+  as no would have shown a clean fleet the day it shipped.
+- **`Merge` only overwrites when the report carries it**, so an older launcher
+  checking in cannot erase what a newer one established — while a genuine `false`
+  still clears it, or deleting the file could never be confirmed from the host.
+- **This machine is excluded from its own warning.** The host is meant to hold the
+  file; a warning that is permanently on is a warning nobody reads.
+
+Still unconfirmed as the cause of 2026-10-20. It needs a support bundle from a
+machine that kept playing, which says `admin.flag IS PRESENT` in one line.
+
+
 ### The TLS-interception check has now been wrong in both directions
 
 Worth keeping in full, because the second failure looked like success.
