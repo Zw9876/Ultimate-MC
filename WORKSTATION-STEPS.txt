@@ -1,0 +1,198 @@
+================================================================
+ WHAT TO DO ON THE WORKSTATIONS
+ Written 2026-10-19, for launcher build 1.2.287.184
+================================================================
+
+Three problems are open, and all three are waiting on information from the
+real machines rather than on more code:
+
+  - pausing everyone works for some people and not others
+  - crashes are more frequent than they used to be
+  - the Setup tab cannot download Minecraft versions
+
+Everything below is reading and copying. Nothing here needs administrator,
+nothing is installed, and no worlds or screenshots are touched.
+
+
+----------------------------------------------------------------
+ BEFORE YOU GO: put these four files on the stick
+----------------------------------------------------------------
+
+From the launcher folder on the host machine:
+
+    Collect-Support.cmd
+    Collect-Support.ps1          <- it is in tools\, copy it out
+    Test-DownloadHosts.cmd
+    Test-DownloadHosts.ps1
+
+And from C:\Users\Zach\ :
+
+    Minecraft-Launcher-Update.zip
+
+The two .cmd files look for their .ps1 beside them first, so keeping all four
+loose in one folder on the stick is correct. Do not put the .ps1 files in a
+subfolder.
+
+
+================================================================
+ STEP 1 - COLLECT FROM ONE WORKSTATION, BEFORE CHANGING ANYTHING
+================================================================
+
+Do this FIRST, on a machine that IGNORED the pause. Updating the launcher
+destroys the evidence of why it was ignored, so this has to come before
+step 3.
+
+  1. Find the launcher folder - the one with MinecraftLauncher.exe in it.
+
+  2. Copy these two files from the stick INTO that folder:
+
+         Collect-Support.cmd
+         Collect-Support.ps1
+
+  3. Double-click Collect-Support.cmd.
+
+  4. Wait. It takes a few seconds, longer where there are many mods, because
+     every mod is hashed so it can be compared against the host.
+
+  5. It finishes by printing a line like:
+
+         Bundle: C:\...\Ultimate-MC-support-MAHD2300906006-20261019-2330.zip
+
+     Copy that one zip onto the stick. That is everything - there is nothing
+     else to go and find.
+
+  6. Press Enter to close the window.
+
+WHAT IT COLLECTS: the launcher's version, launcher_errors.txt in full,
+config.txt, the block and loader caches, every installed version, the newest
+crash reports and logs, every mod with its size and hash, which Javas are
+installed, free space.
+
+WHAT IT DOES NOT COLLECT: worlds, screenshots, resource packs. config.txt IS
+included and holds the Minecraft name last used on that machine - that is how
+the machine gets identified.
+
+
+================================================================
+ STEP 2 - ON THE SAME WORKSTATION, TEST THE DOWNLOADS
+================================================================
+
+  1. Copy these two files from the stick into the same folder:
+
+         Test-DownloadHosts.cmd
+         Test-DownloadHosts.ps1
+
+  2. Double-click Test-DownloadHosts.cmd.
+
+  3. Wait - a few minutes. Hosts that are blocked have to time out before
+     they can be called blocked, and the last part is a real download of a
+     real file, which takes as long as it takes.
+
+  4. Watch for the section headed:
+
+         ---- LARGE TRANSFERS ----
+
+     This is the new part and the whole reason for running it again. Look for
+     these two lines:
+
+         ok    the whole file arrived
+         ok    and its SHA-1 matches the manifest
+
+     If both say ok, downloading from Mojang works on that machine and the
+     Setup tab is failing for some other reason.
+
+     If either says FAIL, that IS the problem, and the report says what to
+     ask for - which is NOT "please unblock Mojang", because Mojang is not
+     blocked. It is an exemption from SCANNING.
+
+  5. Press Enter to close.
+
+  6. Copy download-hosts-report.txt from that folder onto the stick. It will
+     be next to the launcher.
+
+
+================================================================
+ STEP 3 - UPDATE THE HOST
+================================================================
+
+Only after steps 1 and 2. This is the one that fixes the pause.
+
+The pause problem is almost certainly not a bug any more: it was fixed on
+14 October in build 1.2.287.184, and the fleet has probably never received
+it. The last build CONFIRMED to be out there is 1.2.265.376.
+
+  1. On the HOST machine, close the launcher completely.
+
+  2. Open Minecraft-Launcher-Update.zip from the stick.
+
+  3. Copy the 6 files out of it into the launcher folder, replacing the old
+     ones. Choose Replace when Windows asks.
+
+     (The zip also holds a README and two helper files. Those are optional.)
+
+  4. Start the launcher. Check the version in the sidebar reads
+     1.2.287.184.
+
+  5. Leave it running. Every other machine updates itself from it the next
+     time its launcher opens - you should not have to copy anything to the
+     other computers by hand.
+
+
+================================================================
+ STEP 4 - ON THE HOST, ONCE PEOPLE HAVE BEEN ON FOR A WHILE
+================================================================
+
+  1. Open the launcher on the host, go to the ADMIN tab, then FLEET.
+
+  2. Read the list. Every machine that has opened its launcher while the
+     host was running appears, with the build it is on.
+
+  3. Look for a warning line above the list saying how many machines are on
+     a launcher too old to obey a pause. Until that number is zero, pausing
+     everyone will keep reaching only some people - and that is not a bug,
+     it is the fleet being behind.
+
+  4. Run Collect-Support.cmd on the HOST as well, and send that bundle too.
+     On the host it picks up fleet.json, which is the record of which machine
+     is on which build. That single file answers the pause question outright.
+
+
+================================================================
+ WHAT TO SEND BACK
+================================================================
+
+    1. the support bundle zip from the workstation         (step 1)
+    2. download-hosts-report.txt from the workstation      (step 2)
+    3. the support bundle zip from the host                (step 4)
+
+Drop all three at the root of the project folder.
+
+If you can manage a second workstation, run steps 1 and 2 there too and
+choose one that DID obey the pause. Comparing a machine that obeyed against
+one that did not is worth more than either on its own, because the difference
+between them is the answer.
+
+
+================================================================
+ IF SOMETHING GOES WRONG
+================================================================
+
+"Windows protected your PC" / SmartScreen on a .cmd
+    Click More info, then Run anyway. The .cmd files are a few lines of text
+    and you can open either in Notepad first to see exactly what they do.
+
+Double-clicking a .ps1 opens Notepad
+    That is normal and is why the .cmd files exist. Use those.
+
+"Could not find MinecraftLauncher.exe"
+    The files are not in the launcher folder. Either move them in, or drag
+    the launcher folder onto Collect-Support.cmd.
+
+The window closes instantly with no output
+    The .ps1 is missing from the folder. Both files have to be there, the
+    .cmd and the .ps1.
+
+The report says it could not be written
+    The folder is read-only. Copy the launcher folder to the Desktop and run
+    it from there.
+================================================================
