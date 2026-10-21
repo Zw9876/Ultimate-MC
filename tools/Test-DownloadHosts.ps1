@@ -201,6 +201,31 @@ $targets = @(
     # Known-good download CDN, as a second control: this one definitely works,
     # because the Mods tab downloads from it on these machines.
     @{ Group='hosting';   Host='cdn.modrinth.com';                 What='CONTROL: mod downloads land here'; Needed=$false; Url='' }
+
+    # -- PAID / COMMERCIAL CANDIDATES ------------------------------------------
+    # Added 2026-10-21. The question these answer is NOT "are they up" - they are -
+    # but "does ContentKeeper leave them alone or re-sign them". A host it re-signs
+    # is one it inspects and can reclassify; a host it leaves alone is the safer
+    # bet. The Issuer and Cert columns are the whole point for these rows. Where a
+    # real public file exists the Url hits it with a 1 KB range so the Http column
+    # means something; where one does not, the handshake and issuer still do.
+    #
+    # CDN FRONT-ENDS. Often filed under a different category than a raw bucket.
+    @{ Group='hosting';   Host='cdn.jsdelivr.net';                 What='PAID-ish: Fastly/Bunny CDN (real file)'; Needed=$false; Url='https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js' }
+    @{ Group='hosting';   Host='bunny.net';                        What='PAID: Bunny CDN (front door)';  Needed=$false; Url='' }
+    @{ Group='hosting';   Host='keycdn.com';                       What='PAID: KeyCDN (front door)';     Needed=$false; Url='' }
+
+    # COMMERCIAL OBJECT STORES, S3-style, from vendors other than the big three.
+    @{ Group='hosting';   Host='s3.us-west-002.backblazeb2.com';   What='PAID: Backblaze B2 (S3 endpoint)'; Needed=$false; Url='' }
+    @{ Group='hosting';   Host='nyc3.digitaloceanspaces.com';      What='PAID: DigitalOcean Spaces';     Needed=$false; Url='' }
+    @{ Group='hosting';   Host='s3.wasabisys.com';                 What='PAID: Wasabi';                  Needed=$false; Url='' }
+
+    # GENERAL-PURPOSE FILE HOSTS. Expected to behave like the inspected set -
+    # Google Drive is where the rollout zip kept being eaten - but probed so the
+    # expectation is measured rather than assumed.
+    @{ Group='hosting';   Host='dl.dropboxusercontent.com';        What='FILE HOST: Dropbox direct download'; Needed=$false; Url='' }
+    @{ Group='hosting';   Host='drive.usercontent.google.com';     What='FILE HOST: Google Drive direct'; Needed=$false; Url='' }
+    @{ Group='hosting';   Host='api.onedrive.com';                 What='FILE HOST: OneDrive';           Needed=$false; Url='' }
 )
 
 if ($HostingOnly)   { $targets = @($targets | Where-Object { $_.Group -ne 'minecraft' }) }
@@ -242,6 +267,16 @@ $expectedIssuer = @{
     'azureopendatastorage.blob.core.windows.net' = @('Microsoft*', 'DigiCert*')
     'archive.org'                                = @('Go Daddy*', 'GoDaddy*', 'Starfield*')
     'cdn.modrinth.com'                           = @('Certainly*', 'WE*', 'GTS*')
+    # NO baselines for the paid/commercial candidates below. They were tried, and
+    # guessing them was wrong: on a clean machine jsdelivr served Sectigo, bunny
+    # and Backblaze served Cloudflare's YR1 - all genuine, none matching the
+    # guess, and three unrelated mismatches at once is exactly what the detector
+    # treats as interception. These big CDNs legitimately present many issuers by
+    # edge location and customer, so a per-host allow-list is the wrong model for
+    # them. Left out of this table on purpose: a host that is absent here is
+    # simply not fed to the mismatch detector (its issuer still prints in the
+    # table for a human to read). The rule this broke, and it is the project's own:
+    # a baseline that is wrong is worse than no baseline.
 }
 
 # The registrable-ish owner of a hostname, used to tell "the same issuer across
