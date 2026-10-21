@@ -60,7 +60,15 @@ param(
     [int]$BigMB = 12,
 
     # Skip the large-transfer test. It is the slowest part by far.
-    [switch]$SkipBig
+    [switch]$SkipBig,
+
+    # Point the full download test at a candidate MIRROR instead of only Mojang.
+    # This is the gate for internet-provisioning the first machine: put a real
+    # file (50 MB+) on the bucket or CDN you are considering, then
+    #   Test-DownloadHosts.cmd -BigUrl https://your-bucket/path/bigfile.bin
+    # and read whether it arrives whole. A host that passes the 1 KB checks but
+    # eats a real download is no use, and only this finds that out.
+    [string]$BigUrl
 )
 
 $ErrorActionPreference = 'Continue'
@@ -721,6 +729,36 @@ if (-not $SkipBig) {
         return [pscustomobject]@{
             Bytes = $total; Seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1)
             Sha1 = $hex; Stalled = $stalled
+        }
+    }
+
+    # ---- a candidate MIRROR, when one was given ----------------------------
+    # The whole point of internet-provisioning the first machine: can it pull a
+    # real file, whole, from a host we would actually host on. Separate from the
+    # Mojang block below, which tests the sources the launcher uses today.
+    if ($BigUrl) {
+        Say ''
+        Say "  CANDIDATE MIRROR - downloading your file in full:"
+        Say "    $BigUrl"
+        try {
+            $m = Pull $BigUrl 0 300
+            $mrate = if ($m.Seconds -gt 0) { [math]::Round(($m.Bytes / 1MB) / $m.Seconds, 2) } else { 0 }
+            Say "    got $([math]::Round($m.Bytes / 1MB, 1)) MB in $($m.Seconds)s (about $mrate MB/s), sha1 $($m.Sha1.Substring(0,12))"
+            if ($m.Stalled) {
+                Say '    STALLED before it finished - this host eats a real download,'
+                Say '    exactly like Mojang. Not usable as a mirror.'
+            } elseif ($m.Bytes -lt 1MB) {
+                Say '    Suspiciously small - check the URL points at the file itself,'
+                Say '    not a share/preview page.'
+            } else {
+                Say '    Arrived whole and without stalling. This host can carry a'
+                Say '    real payload past the filter - compare the sha1 above to the'
+                Say '    file you uploaded to be certain it is byte-for-byte.'
+            }
+        } catch {
+            $cm = $_.Exception.Message -replace "`r?`n", ' '
+            Say "    FAILED: $cm"
+            Say '    Something refused or answered instead of the file. Not usable.'
         }
     }
 
