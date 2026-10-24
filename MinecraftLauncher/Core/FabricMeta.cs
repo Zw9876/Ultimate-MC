@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -96,7 +96,7 @@ namespace MinecraftLauncher.Core
                     artifact.TryGetProperty("url", out var artUrl))
                 {
                     string sha1 = artifact.TryGetProperty("sha1", out var s) ? s.GetString() ?? "" : "";
-                    await Downloader.GetVerifiedAsync(artUrl.GetString()!, dest, sha1, log, ct);
+                    await Downloader.GetVerifiedOrThrowAsync(artUrl.GetString()!, dest, sha1, log, ct);
                 }
                 else
                 {
@@ -104,7 +104,7 @@ namespace MinecraftLauncher.Core
                         ? (u.GetString() ?? DefaultLibraryRepo).TrimEnd('/')
                         : DefaultLibraryRepo;
 
-                    await Downloader.GetVerifiedAsync($"{repo}/{relative}", dest, null, log, ct);
+                    await Downloader.GetVerifiedOrThrowAsync($"{repo}/{relative}", dest, null, log, ct);
                 }
             }
 

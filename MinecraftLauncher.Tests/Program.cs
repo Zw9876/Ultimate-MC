@@ -47,6 +47,7 @@ namespace MinecraftLauncher.Tests
                 new("blocks",     false, () => Task.Run(PlayBlockTests.Run)),
                 new("loaderpolicy",false, () => Task.Run(LoaderPolicyTests.Run)),
                 new("discovery",  false, () => Task.Run(SkinDiscoveryTests.Run)),
+                new("netblock",   false, NetworkBlockTests.RunAsync),
                 new("packs",      false, FabricPackTests.RunAsync),
                 new("serverpacks",false, FabricServerPackTests.RunAsync),
                 new("modrinth",   true,  ModrinthTests.RunAsync)

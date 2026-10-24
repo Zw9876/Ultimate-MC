@@ -2087,8 +2087,14 @@ namespace MinecraftLauncher.UI
             }
             catch (Exception ex)
             {
+                // The server jar now fails loudly when a filter answers in Mojang's
+                // place, instead of saving the filter's page as server.jar - so this is
+                // where that lands, and it is recorded rather than only shown.
+                App.Log(ex);
                 ServerStatus.Text = "Error: " + ex.Message;
-                MessageBox.Show(ex.Message, "Server failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(ex.Message,
+                    ex is NetworkBlockedException ? "Blocked on this network" : "Server failed",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -3887,7 +3893,15 @@ namespace MinecraftLauncher.UI
             }
             catch (Exception ex)
             {
-                SetupLogLine("Could not load the manifest: " + ex.Message);
+                // Logged as well as shown. This failure used to go to the Setup log
+                // box and nowhere else, so on the workstations - where a content
+                // filter answers Mojang with a page of its own - there was nothing on
+                // disk to send, and launcher_errors.txt, which is only written for
+                // UNHANDLED errors, never appeared at all.
+                App.Log(ex);
+                SetupLogLine(ex is NetworkBlockedException
+                    ? ex.Message
+                    : "Could not load the manifest: " + ex.Message);
             }
             finally
             {
@@ -4019,8 +4033,13 @@ namespace MinecraftLauncher.UI
             }
             catch (Exception ex)
             {
+                // Recorded, for the same reason as the manifest above: a failure that
+                // is only ever shown on screen cannot be diagnosed from somewhere else.
+                App.Log(ex);
                 SetupLogLine("Failed: " + ex.Message);
-                MessageBox.Show(ex.Message, "Install failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(ex.Message,
+                    ex is NetworkBlockedException ? "Blocked on this network" : "Install failed",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {

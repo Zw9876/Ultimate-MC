@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -70,7 +70,7 @@ namespace MinecraftLauncher.Core
             string url = server.GetProperty("url").GetString()!;
             string sha1 = server.TryGetProperty("sha1", out var s) ? s.GetString() ?? "" : "";
 
-            await Downloader.GetVerifiedAsync(url, serverJar, sha1, log, ct);
+            await Downloader.GetVerifiedOrThrowAsync(url, serverJar, sha1, log, ct);
         }
 
         private static async Task InstallFabricAsync(

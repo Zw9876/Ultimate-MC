@@ -68,6 +68,8 @@ launcher_errors.txt
 antivirus-report.txt
 # Written by tools\Test-DownloadHosts.ps1, likewise.
 download-hosts-report.txt
+# What a filter answered with instead, saved by the same script.
+download-hosts-blockpage.txt
 
 # ── Transport copy ──
 # tools\Test-DownloadHosts.ps1 is also kept at the repo root, so it can be

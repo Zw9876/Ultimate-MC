@@ -849,7 +849,12 @@ if (-not $SkipBig) {
                 Say "    The whole thing is saved to $bodyFile - send that too."
             } catch { }
 
-            $looksLikePage = ($body -match '(?i)<html|<!doctype|contentkeeper|blocked|denied|not permitted|policy')
+            # ContentKeeper's silent page is an HTML comment around an empty Blank()
+            # function and contains none of the words below - so on 2026-10-23 it was
+            # labelled merely "not JSON" when it was the filter itself. Matched on
+            # its real shape now, the same test the launcher uses (NetworkBlock.cs).
+            $looksLikePage = ($body.TrimStart([char]0xFEFF, ' ', [char]9, [char]13, [char]10) -match '(?i)^<(!--|html|!doctype|head|body|script|meta)') -or
+                             ($body -match '(?i)function Blank\(\)|contentkeeper|blocked|denied|not permitted|policy')
             $bigWhy = if ($looksLikePage) {
                 'something answered INSTEAD of Mojang - a filter page, not the manifest'
             } else {

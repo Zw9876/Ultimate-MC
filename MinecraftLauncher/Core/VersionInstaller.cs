@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -40,7 +40,14 @@ namespace MinecraftLauncher.Core
             await Downloader.GetFileAsync(versionUrl, versionJsonPath, ct);
             percent?.Report(2);
 
-            using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(versionJsonPath, ct));
+            string versionText = await File.ReadAllTextAsync(versionJsonPath, ct);
+            if (NetworkBlock.LooksLikeFilterPage(versionText))
+            {
+                // Not left on disk: an install that finds a version JSON already there
+                // trusts it.
+                try { File.Delete(versionJsonPath); } catch { }
+            }
+            using var doc = NetworkBlock.ParseOrBlocked(versionUrl, versionText);
             var root = doc.RootElement;
 
             // ── Client jar ──
@@ -52,7 +59,7 @@ namespace MinecraftLauncher.Core
                 string dest = Path.Combine(versionsSub, $"{mcVersion}-client.jar");
 
                 log?.Report("Downloading client jar…");
-                await Downloader.GetVerifiedAsync(url, dest, sha1, log, ct);
+                await Downloader.GetVerifiedOrThrowAsync(url, dest, sha1, log, ct);
             }
             percent?.Report(10);
 
@@ -97,7 +104,7 @@ namespace MinecraftLauncher.Core
                 string indexPath = Path.Combine(assetsDir, "indexes", $"{indexId}.json");
 
                 log?.Report($"Downloading asset index {indexId}…");
-                await Downloader.GetVerifiedAsync(indexUrl, indexPath, indexSha, log, ct);
+                await Downloader.GetVerifiedOrThrowAsync(indexUrl, indexPath, indexSha, log, ct);
 
                 await DownloadAssetsAsync(indexPath, assetsDir, log, percent, ct);
             }
@@ -134,7 +141,7 @@ namespace MinecraftLauncher.Core
 
                     // The asset's name is its SHA-1, so verification costs nothing
                     // extra and lets a corrupted cached asset repair itself.
-                    await Downloader.GetVerifiedAsync($"{ResourcesBase}/{sub}/{hash}", dest, hash, null, ct);
+                    await Downloader.GetVerifiedOrThrowAsync($"{ResourcesBase}/{sub}/{hash}", dest, hash, null, ct);
 
                     int n = Interlocked.Increment(ref done);
                     if (n % 100 == 0)
@@ -162,7 +169,7 @@ namespace MinecraftLauncher.Core
             string relative = (pathEl.GetString() ?? "").Replace('/', Path.DirectorySeparatorChar);
             string sha1 = artifact.TryGetProperty("sha1", out var s) ? s.GetString() ?? "" : "";
 
-            await Downloader.GetVerifiedAsync(url, Path.Combine(libsDir, relative), sha1, log, ct);
+            await Downloader.GetVerifiedOrThrowAsync(url, Path.Combine(libsDir, relative), sha1, log, ct);
         }
 
         /// <summary>

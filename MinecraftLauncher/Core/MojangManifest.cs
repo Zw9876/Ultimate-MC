@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
@@ -34,7 +34,11 @@ namespace MinecraftLauncher.Core
             if (!forceRefresh && _cache is not null) return _cache;
 
             string json = await Downloader.GetStringAsync(ManifestUrl, ct);
-            using var doc = JsonDocument.Parse(json);
+
+            // ParseOrBlocked rather than JsonDocument.Parse: a content filter answers
+            // this request with HTTP 200 and its own page, and the parser's verdict on
+            // that - a complaint about the character '<' - told nobody anything.
+            using var doc = NetworkBlock.ParseOrBlocked(ManifestUrl, json);
 
             var list = new List<MojangVersion>();
             foreach (var v in doc.RootElement.GetProperty("versions").EnumerateArray())

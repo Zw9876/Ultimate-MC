@@ -1394,6 +1394,74 @@ WPF code-behind thin.
 ---
 ## 11. Notable gotchas learned the hard way (so they aren't rediscovered)
 
+### "Read launcher_errors.txt" pointed at a file that could not contain the answer
+
+For a week the advice for the Setup tab failing on the workstations was "send
+launcher_errors.txt". It never existed. Not because nothing went wrong, but because
+it was only ever written by the **unhandled**-exception handler in `App.xaml.cs` and
+nine explicit `App.Log` calls. The Setup tab **catches** its own failures:
+
+```csharp
+catch (Exception ex)
+{
+    SetupLogLine("Could not load the manifest: " + ex.Message);
+}
+```
+
+So the error was shown once, in a log box, as a JSON parser's complaint about the
+character `<`, and written nowhere. The person at the machine saw it scroll past;
+nobody else could see it at all. The fix is the rule now in CLAUDE.md: anything you
+catch and show, also `App.Log`. The Setup manifest load, the Setup install and the
+Server tab's start all do.
+
+### A filter's page saved as a jar, and the install said "Done."
+
+The second half of the same afternoon, and the more dangerous one. What arrives from
+a blocked host is ContentKeeper's silent page, with **HTTP 200** — captured verbatim
+on 2026-10-23:
+
+```
+<!--
+function Blank()
+{
+var nothing=0;
+}
+Blank();
+//-->
+```
+
+65 characters. Nothing at the HTTP layer can catch that; the status says success.
+`Downloader.GetVerifiedAsync` would then fail the SHA-1 check, log one line, **leave
+the file on disk under its proper name**, and return `false` — and `VersionInstaller`,
+`ServerJarInstaller` and `FabricMeta` ignored that return value at **seven** call
+sites, the asset loop with a `null` log. An install whose every file had been
+replaced by that page would have reported "Done." and failed later, inside the game,
+somewhere with no connection to the network.
+
+Fixed in three layers:
+
+- `Core/NetworkBlock.cs` recognises a filter's page by **shape**, written against the
+  captured body rather than from memory: the opening of an HTML document, or a known
+  filter's marker. Deliberately not a bare `<`, so Maven's `<?xml` metadata is never
+  mistaken for a block — every file the launcher downloads is JSON (`{`), a jar or zip
+  (`PK`) or an asset blob, none of which begins like a web page.
+- `Downloader.GetVerifiedOrThrowAsync` is what the installers use now: a filter's
+  page becomes a `NetworkBlockedException` naming the host, a hash failure becomes an
+  `IOException`, and in both cases **the file is deleted**. It catches the page even
+  with no hash to compare, because FabricMeta downloads some libraries that way. The
+  bool-returning `GetVerifiedAsync` keeps its contract for its other callers but no
+  longer leaves a failed file behind either.
+- The message is written for the person reading it: *"launchermeta.mojang.com is
+  blocked on this network. Something answered in its place with a 65-character web
+  page instead of the file — that is what a content filter does…"* — not a parser
+  error.
+
+Two cases are tested specifically so the fix cannot overreach: genuinely broken JSON
+stays a JSON error, and a corrupt file stays a hash failure. Blaming the network for
+those would send somebody to the wrong person, which is the same mistake in the other
+direction.
+
+
 ### HTTP 200 is not reachability, and this script says so in its own header
 
 The host probe reported all five Mojang hosts as `Http 200`, twice, and both
@@ -2175,7 +2243,7 @@ noticeable on a standalone machine.
 
 ### The test project
 
-`MinecraftLauncher.Tests/` — **888 offline checks in about 7 seconds**, and around 930 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
+`MinecraftLauncher.Tests/` — **935 offline checks in about 10 seconds**, and around 930 with the network suite — that total drifts, because the Modrinth checks count what the live API returns.
 
 ```powershell
 tools\run-tests.ps1                 # everything
